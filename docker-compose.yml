@@ -1,0 +1,25 @@
+services:
+  mco-snotel:
+    platform: linux/amd64
+    build:
+      context: .
+    image: mco-snotel:latest
+    environment:
+      TZ: America/Denver
+      S3_BUCKET: mco-snotel
+      WORK_DIR: /pipeline/s3
+      AWS_PROFILE: mco
+      AWS_DEFAULT_REGION: us-west-2
+      KEEP_LOCAL: "true"
+      CORES: "4"
+      # Short-lived credentials injected by run_local.sh — paws uses these
+      # directly and bypasses the SSO credential chain entirely.
+      AWS_ACCESS_KEY_ID:
+      AWS_SECRET_ACCESS_KEY:
+      AWS_SESSION_TOKEN:
+    volumes:
+      - .:/pipeline:rw
+      - ${HOME}/.aws:/root/.aws:ro
+    mem_limit: 8g
+    mem_reservation: 1g
+    restart: "no"

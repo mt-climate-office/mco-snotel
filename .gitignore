@@ -5,3 +5,14 @@
 .httr-oauth
 .DS_Store
 .quarto
+.venv
+uv.lock
+s3
+data/
+
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/terraform.tfvars
