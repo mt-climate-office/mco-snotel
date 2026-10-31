@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# mco-snotel.R — nightly SNOTEL pipeline
+# mco-snotel.R — daily SNOTEL pipeline (10:00 AM Mountain)
 #
 # Calls the stage functions in R/stages.R. Each stage reads and writes its own
 # state in S3, so stages can also be run on their own.
@@ -54,7 +54,7 @@ wy <- water_year(the_date)
 
 done <- stage_percentiles(wy)
 
-# A plotting failure still lets the night's tables publish, but the task exits
+# A plotting failure still lets the day's tables publish, but the task exits
 # non-zero so the failure shows in ECS.
 plots_ok <- TRUE
 if (CALC_FIGURES && length(done)) {

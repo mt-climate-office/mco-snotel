@@ -5,7 +5,7 @@ every NRCS [SNOTEL](https://www.nrcs.usda.gov/resources/data-and-reports/snow-an
 station, active and retired, with SWE normals, percentiles and per-station plots, built
 by the Montana Climate Office. The normals and plots use the methods and design of
 [mco-snodas](https://github.com/mt-climate-office/mco-snodas), applied to each station's
-own record. It runs nightly on AWS.
+own record. It runs daily at 10:00 AM Mountain on AWS.
 
 - **Data:** <https://data2.climate.umt.edu/snotel/>. Each directory has a `README.md`
   (sources in [`s3-docs/`](s3-docs/)).
@@ -14,7 +14,7 @@ own record. It runs nightly on AWS.
 ## Pipeline
 
 ```
-Nightly (mco-snotel.R, ECS Fargate, 10:00 AM Mountain)
+Daily (mco-snotel.R, ECS Fargate, 10:00 AM Mountain)
   1  station metadata from AWDB                                     stations/
   2  refetch the water year to date from AWDB and replace those
      rows of the archive (NRCS edits recent values)                 archive/snotel.parquet
@@ -59,7 +59,7 @@ Feb 28). Years without a value are skipped. A day needs at least 10 valid years 
 year, in a period shorter than 10), so a station with a short record has no normals until
 it has 10 years. Normals are built once a year, on Oct 1, and frozen for that water year,
 together with the record they were built from (`normals/reference/wy{YYYY}.parquet`). Each
-night's percentiles are computed against that frozen record, so NRCS edits to past years do
+day's percentiles are computed against that frozen record, so NRCS edits to past years do
 not move the normals mid-year.
 
 **Model.** Every flavor uses the same zero-inflated form, since SWE is often exactly zero:
@@ -100,7 +100,7 @@ flavors share their SWE axis. Files are 1500 × 1000 px, 8-bit PNGs.
 (mean error 0.16 of 255 against 0.13 for a palette fitted to station plots alone, on
 2026-10-29); the palette is only ever rebuilt upstream.
 
-The nightly run plots the `snodas` period. To plot other periods or past dates, use
+The daily run plots the `snodas` period. To plot other periods or past dates, use
 `viz.R` (or `scripts/backfill-figures.sh` on Fargate), not `mco-snotel.R`:
 
 ```bash
@@ -131,7 +131,7 @@ at the recorded commit.
 ## Repository
 
 ```
-mco-snotel.R           nightly pipeline
+mco-snotel.R           daily pipeline
 normals-annual.R       yearly normals build
 viz.R                  plots only, for past dates or other periods
 R/
@@ -157,13 +157,13 @@ Requirements: R 4.5 with the packages in the `Dockerfile`, and the AWS CLI with 
 profile (`aws sso login --profile mco`).
 
 ```bash
-Rscript mco-snotel.R                       # nightly run
+Rscript mco-snotel.R                       # daily run
 Rscript normals-annual.R                   # yearly build (refetches the whole archive)
 WATER_YEAR=2027 SKIP_REFRESH=true Rscript normals-annual.R
 Rscript scripts/test_distributions.R       # ECDF and ZIG tests (vendored)
 Rscript scripts/test_stations.R            # station normals on live AWDB data
 ./scripts/check-vendored.sh                # vendored code still matches mco-snodas
-./scripts/run_local.sh                     # nightly run in Docker, refreshing SSO credentials
+./scripts/run_local.sh                     # daily run in Docker, refreshing SSO credentials
 docker compose run --rm mco-snotel normals-annual.R
 ```
 
@@ -187,15 +187,15 @@ started. Run with `CORES=1` outside Docker on a Mac.
 | `CORES` | `1` | Plotting and fitting workers. |
 
 The first deploy needs the whole record and the current water year's normals before the
-nightly run can work: run `normals-annual.R` once (it refetches the archive), then
+daily run can work: run `normals-annual.R` once (it refetches the archive), then
 `scripts/backfill-figures.sh` from Oct 1 to the day before.
 
 ## Infrastructure
 
 Terraform in `terraform/` (state in S3): ECR repository, ECS cluster and task (4 vCPU,
-16 GB), the nightly and yearly EventBridge schedules (the yearly one runs the same task with
-`normals-annual.R`), the public bucket (public list, CORS for `data2.climate.umt.edu`;
-`plots/` move to Standard-IA after a year), CloudWatch logs.
+16 GB), the daily and yearly EventBridge schedules (the yearly one runs the same task with
+`normals-annual.R`), the public bucket (public list, CORS for `data2.climate.umt.edu`),
+CloudWatch logs.
 
 The bucket is served at `data2.climate.umt.edu/snotel/` by the shared data CDN, defined in
 [mco-data-cdn](https://github.com/mt-climate-office/mco-data-cdn) (`origin_buckets` in its

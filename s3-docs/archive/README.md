@@ -4,7 +4,7 @@
 by `triplet` and `date`. Values are as NRCS's Air and Water Database (AWDB) stores them, in
 inches and °F, each with its QC and QA flags. Station metadata is in `../stations/`.
 
-The current water year is refetched from AWDB every night, since NRCS edits recent values,
+The current water year is refetched from AWDB every day, since NRCS edits recent values,
 and the whole record once a year, on Oct 1. AWDB leaves out values NRCS has marked suspect,
 so a value flagged later drops out at the next refetch that covers its date.
 

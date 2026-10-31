@@ -20,7 +20,7 @@
 # (MIN_VALID_YEARS in src/ecdf_impl.h).
 #
 # The frozen record (normals/reference/wy{W}.parquet) is what the normals
-# were built from; nightly percentiles are computed against it, as mco-snodas
+# were built from; daily percentiles are computed against it, as mco-snodas
 # computes them against its saved raw means, so later NRCS edits to the
 # historical record do not shift the normals mid-year.
 

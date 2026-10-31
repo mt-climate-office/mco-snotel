@@ -1,7 +1,7 @@
 # SNOTEL — daily station data, SWE normals and percentiles
 
 Daily data from every NRCS SNOTEL station, active and retired, with SWE normals,
-percentiles and plots, processed by the Montana Climate Office. Updated nightly around
+percentiles and plots, processed by the Montana Climate Office. Updated daily around
 10 AM Mountain. Values are in inches and °F, as NRCS stores them.
 Source and methods: [github.com/mt-climate-office/mco-snotel](https://github.com/mt-climate-office/mco-snotel).
 Building an app on these data: see

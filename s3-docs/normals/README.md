@@ -31,10 +31,10 @@ a period shorter than 10), so stations with a short record have empty normals.
 | `<period>/wy<YYYY>/zig_smooth_coef.parquet` | `zig_smooth` spline coefficients per station: `nu_01`–`nu_24`, `l1_01`–`l1_24`, `lcv_01`–`lcv_24` |
 | `<period>/wy<YYYY>/zig_smooth_diagnostics.parquet` | Fit status, λ and effective degrees of freedom per station |
 | `<period>/wy<YYYY>/zig_smooth_basis.csv`, `zig_smooth_model.json` | The spline basis (cycle days 1–365, Oct 1 = 1) and how to rebuild the curves |
-| `<period>/observed/wy<YYYY>.parquet` | Every station's observed SWE and percentiles for the water year, to date, rewritten nightly |
+| `<period>/observed/wy<YYYY>.parquet` | Every station's observed SWE and percentiles for the water year, to date, rewritten daily |
 | `reference/wy<YYYY>.parquet` | The SWE record (`triplet`, `date`, `wteq`) the water year's normals were built from, frozen on Oct 1 |
 
-Nightly percentiles are computed against the frozen `reference/` record, so NRCS edits to
+Daily percentiles are computed against the frozen `reference/` record, so NRCS edits to
 past years do not move a water year's normals.
 
 ## Flavors

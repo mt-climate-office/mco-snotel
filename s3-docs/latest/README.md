@@ -1,6 +1,6 @@
 # Latest SNOTEL data
 
-This water year's tables, replaced nightly. Read `manifest.json` first: it gives the newest
+This water year's tables, replaced daily. Read `manifest.json` first: it gives the newest
 date with SWE and lists every file.
 
 ```json
