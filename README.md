@@ -106,7 +106,13 @@ The daily run plots the `snodas` period. To plot other periods or past dates, us
 ```bash
 VIZ_DATES=2026-10-01:2026-10-30 VIZ_PERIODS=snodas,30yr Rscript viz.R
 VIZ_PERIODS=30yr,por ./scripts/backfill-figures.sh 2026-10-01 2026-10-30 5 4
+./scripts/backfill-figures.sh 2024-10-01 2026-10-29 auto 3
 ```
+
+Backfill tasks run at 16 vCPU (the Fargate maximum) and plot 16 stations at once,
+because the shared subnets have only a few free addresses and each task takes one.
+A date takes about 12 minutes. `auto` splits the dates evenly across the tasks, so every
+task starts at once and runs to the end even if the machine that launched it sleeps.
 
 ## Vendored code
 
