@@ -38,7 +38,14 @@ periods  <- split_env("VIZ_PERIODS", unset = paste(SNOTEL_PLOT_PERIODS, collapse
 stations <- split_env("VIZ_STATIONS")
 stopifnot(all(periods %in% SNOTEL_PERIODS))
 
+failed <- character()
 for (d in as.list(sort(unique(dates)))) {
   tryCatch(stage_viz(d, periods = periods, stations = stations),
-           error = \(e) message("  Plots failed for ", format(d), ": ", conditionMessage(e)))
+           error = \(e) {
+             message("  Plots failed for ", format(d), ": ", conditionMessage(e))
+             failed <<- c(failed, format(d))
+           })
 }
+# Exit non-zero so a failed date shows in ECS; backfill-figures.sh redoes any
+# date without a complete index.json.
+if (length(failed)) stop("Plots failed for ", paste(failed, collapse = ", "))

@@ -54,11 +54,15 @@ wy <- water_year(the_date)
 
 done <- stage_percentiles(wy)
 
+# A plotting failure still lets the night's tables publish, but the task exits
+# non-zero so the failure shows in ECS.
+plots_ok <- TRUE
 if (CALC_FIGURES && length(done)) {
-  tryCatch(stage_viz(the_date),
-           error = \(e) message("  Plots failed for ", format(the_date), ": ", conditionMessage(e)))
+  plots_ok <- tryCatch({ stage_viz(the_date); TRUE },
+                       error = \(e) { message("  Plots failed for ", format(the_date), ": ", conditionMessage(e)); FALSE })
 }
 
 stage_publish(the_date)
 
+if (!plots_ok) stop("Plots failed for ", format(the_date), "; tables were published")
 message("=== SNOTEL pipeline: done ===")

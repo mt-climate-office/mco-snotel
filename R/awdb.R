@@ -64,7 +64,9 @@ awdb_stations <- function() {
     longitude    = col("longitude", as.numeric),
     begin_date   = col("beginDate", day),
     end_date     = col("endDate", day),
-    active       = end_date >= lubridate::as_date("2100-01-01")
+    # AWDB gives active stations an end date of 2100-01-01; a missing one is
+    # treated the same, so the station is still fetched.
+    active       = is.na(end_date) | end_date >= lubridate::as_date("2100-01-01")
   ) |>
     dplyr::arrange(triplet)
 }

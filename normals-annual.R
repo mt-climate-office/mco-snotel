@@ -51,14 +51,18 @@ if (SKIP_REFRESH) {
 stage_normals(wy, periods = periods)
 done <- stage_percentiles(wy, periods = periods)
 
+plots_ok <- TRUE
 if (wy == water_year(today)) {
   the_date <- latest_swe_date(today)
   if (!is.na(the_date)) {
     if (CALC_FIGURES && any(SNOTEL_PLOT_PERIODS %in% done))
-      tryCatch(stage_viz(the_date),
-               error = \(e) message("  Plots failed for ", format(the_date), ": ", conditionMessage(e)))
+      plots_ok <- tryCatch({ stage_viz(the_date); TRUE },
+                           error = \(e) { message("  Plots failed for ", format(the_date), ": ", conditionMessage(e)); FALSE })
     stage_publish(the_date)
   }
 }
 
+# Normals and tables are published either way; the task exits non-zero so a
+# plotting failure shows in ECS.
+if (!plots_ok) stop("Plots failed; normals and tables were published")
 message("=== SNOTEL normals: done ===")

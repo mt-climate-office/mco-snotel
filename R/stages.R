@@ -25,6 +25,7 @@ write_pq <- function(x, path, chunk_size = NULL) {
   fs::dir_create(dirname(path))
   arrow::write_parquet(x, sink = path, compression = "zstd", compression_level = 13L,
                        use_dictionary = TRUE, chunk_size = chunk_size)
+  s3_mark_fresh(path)
   invisible(path)
 }
 
@@ -39,12 +40,19 @@ s3_sync_dir <- function(local_dir, prefix, exclude = NULL) {
   aws_s3(c("sync", src, dest, "--exclude", shQuote("*.parquet"), ex))
 }
 
-# A local copy of an S3 object: downloaded when `refresh` or missing locally.
-# Returns the path, or NULL when the object is not in S3.
+# Local copies fetched or written by this process. A copy left in WORK_DIR by
+# an earlier run may be out of date, so it is fetched again before first use.
+.s3_fresh <- new.env(parent = emptyenv())
+s3_mark_fresh <- function(path) assign(normalizePath(path, mustWork = FALSE), TRUE, envir = .s3_fresh)
+
+# A local copy of an S3 object: downloaded when `refresh`, or when this process
+# has not fetched or written it yet. Returns the path, or NULL when the object
+# is not in S3.
 s3_local <- function(key, refresh = TRUE) {
   local <- file.path(OUTPUT_DIR, key)
-  if (!refresh && file.exists(local)) return(local)
-  if (s3_get_file(S3_BUCKET, key, local)) local
+  if (!refresh && file.exists(local) &&
+      exists(normalizePath(local, mustWork = FALSE), envir = .s3_fresh, inherits = FALSE)) return(local)
+  if (s3_get_file(S3_BUCKET, key, local)) { s3_mark_fresh(local); local }
 }
 
 stations_read <- function(refresh = FALSE) {
@@ -203,7 +211,7 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
   errors <- character(); n_stations <- 0L; ref_years_out <- list()
   for (period in periods) {
     np <- s3_local(file.path(normals_prefix(period, wy), "normals.parquet"), refresh = FALSE)
-    op <- s3_local(observed_key(period, wy), refresh = upload)
+    op <- s3_local(observed_key(period, wy), refresh = FALSE)
     if (is.null(np) || is.null(op)) { message("  ", period, ": no normals or percentiles for WY", wy); next }
     normals  <- arrow::read_parquet(np, col_select = c("flavor", "date", "triplet",
                                                        "ref_first_wy", "ref_last_wy", dplyr::all_of(q_cols)))
@@ -304,7 +312,12 @@ stage_publish <- function(date) {
   files <- character()
   for (dest in names(copies)) {
     src <- copies[[dest]]
-    if (!s3_exists(src)) next
+    if (!s3_exists(src)) {
+      # e.g. Oct 1 before the yearly build: drop last water year's table rather
+      # than serve it under this year's manifest.
+      s3$delete_object(Bucket = S3_BUCKET, Key = dest)
+      next
+    }
     s3$copy_object(Bucket = S3_BUCKET, CopySource = paste0(S3_BUCKET, "/", src), Key = dest)
     files <- c(files, dest)
   }
