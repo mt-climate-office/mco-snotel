@@ -12,6 +12,7 @@ services:
       AWS_DEFAULT_REGION: us-west-2
       KEEP_LOCAL: "true"
       CORES: "4"
+      CALC_FIGURES: "true"
       # Short-lived credentials injected by run_local.sh — paws uses these
       # directly and bypasses the SSO credential chain entirely.
       AWS_ACCESS_KEY_ID:
@@ -20,6 +21,6 @@ services:
     volumes:
       - .:/pipeline:rw
       - ${HOME}/.aws:/root/.aws:ro
-    mem_limit: 8g
+    mem_limit: 16g
     mem_reservation: 1g
     restart: "no"

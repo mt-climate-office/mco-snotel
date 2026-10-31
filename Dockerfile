@@ -1,31 +1,37 @@
-FROM rocker/r-ver:4.5
+# R 4.5.3 with CRAN pinned to the Posit Package Manager snapshot of
+# 2026-04-23, so every R package below installs at that snapshot's version.
+FROM rocker/r-ver:4.5.3@sha256:f5a72ffeea7ed592b2a5990f87101beef8ef3cae0e4ff7327088e80368f0aef9
 
-# Install AWS CLI v2 and system dependencies
+# Nimbus Sans (registered as Helvetica for the plots, R/utils.R), AWS CLI v2
+# (S3 syncs), and the shared libraries the snapshot's binary R packages link
+# that the base image lacks (libuv for fs, libwebpmux for ragg). curl and
+# unzip only fetch the CLI.
+ARG AWSCLI_VERSION=2.38.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl unzip && \
-    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip && \
+      curl unzip fonts-urw-base35=20200910-8 libuv1t64 libwebpmux3 && \
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWSCLI_VERSION}.zip" -o /tmp/awscliv2.zip && \
     unzip -q /tmp/awscliv2.zip -d /tmp && \
     /tmp/aws/install && \
     rm -rf /tmp/awscliv2.zip /tmp/aws && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install R packages via pak
-RUN Rscript -e " \
-  install.packages('pak', repos = 'https://r-lib.github.io/p/pak/stable/'); \
-  pak::pkg_install(c( \
-    'magrittr', \
-    'tidyverse', \
-    'lubridate', \
-    'snotelr', \
-    'arrow', \
-    'paws.storage', \
-    'fs', \
-    'furrr', \
-    'future' \
-  )) \
-"
+# R packages from the image's dated snapshot. The pins that matter for
+# matching mco-snodas are checked: RcppArmadillo (the ZIG-smooth fit) and
+# fastpng / colorfast (the fixed-palette PNGs).
+RUN install2.r --error --skipinstalled --ncpus -1 \
+      magrittr dplyr tidyr purrr tibble lubridate fs jsonlite \
+      arrow httr2 paws.storage \
+      Rcpp RcppArmadillo \
+      ggplot2 patchwork gtable scales ragg png systemfonts colorfast fastpng && \
+    Rscript -e " \
+      pins <- c(RcppArmadillo = '15.2.6.1', fastpng = '0.1.8', colorfast = '1.0.1'); \
+      got  <- vapply(names(pins), \(p) as.character(packageVersion(p)), ''); \
+      if (!identical(unname(got), unname(pins))) stop('Unexpected package versions: ', paste(names(pins), got, collapse = ', ')) \
+    " && \
+    rm -rf /tmp/downloaded_packages
 
 WORKDIR /pipeline
 COPY . /pipeline
 
-ENTRYPOINT ["Rscript", "mco-snotel.R"]
+ENTRYPOINT ["Rscript"]
+CMD ["mco-snotel.R"]

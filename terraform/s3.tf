@@ -33,6 +33,16 @@ resource "aws_s3_bucket_policy" "outputs_public_read" {
         Principal = "*"
         Action    = "s3:GetObject"
         Resource  = "${aws_s3_bucket.outputs.arn}/*"
+      },
+      {
+        # Public ListBucket makes missing keys return 404 instead of 403,
+        # including through the CDN's pass-through origin, and lets the CDN's
+        # storage browser list the bucket.
+        Sid       = "PublicListBucket"
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "s3:ListBucket"
+        Resource  = aws_s3_bucket.outputs.arn
       }
     ]
   })
@@ -44,11 +54,37 @@ resource "aws_s3_bucket_policy" "outputs_public_read" {
 resource "aws_s3_bucket_cors_configuration" "outputs" {
   bucket = aws_s3_bucket.outputs.id
 
+  # Restricted to the data CDN, as for mco-snodas: browsers use
+  # data2.climate.umt.edu/snotel/, not the raw S3 endpoint.
   cors_rule {
     allowed_headers = ["*"]
-    allowed_methods = ["GET", "HEAD"]
-    allowed_origins = ["*"]
-    expose_headers  = ["Content-Range", "Accept-Ranges", "Content-Length", "ETag"]
+    allowed_methods = ["GET"]
+    allowed_origins = [
+      "https://d1s8jav5n0eyyf.cloudfront.net",
+      "https://data2.climate.umt.edu",
+    ]
     max_age_seconds = 3600
+  }
+}
+
+# Plots are a permanent dated archive (~2,800 a night at ~80 KB, ~80 GB a
+# year). After a year they move to Standard-IA, as mco-snodas's do: instantly
+# readable, a small per-GB retrieval fee. The age is from upload, so
+# backfilled plots move a year after upload.
+resource "aws_s3_bucket_lifecycle_configuration" "outputs" {
+  bucket = aws_s3_bucket.outputs.id
+
+  rule {
+    id     = "plots-to-standard-ia"
+    status = "Enabled"
+
+    filter {
+      prefix = "plots/"
+    }
+
+    transition {
+      days          = 365
+      storage_class = "STANDARD_IA"
+    }
   }
 }
