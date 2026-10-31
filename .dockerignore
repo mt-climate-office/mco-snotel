@@ -5,9 +5,14 @@
 .httr-oauth
 .DS_Store
 .quarto
+.claude
+.github
 s3/
+s3-docs/
 data/
 terraform/
 scripts/
 .git/
 docker-compose.yml
+test.R
+*.md

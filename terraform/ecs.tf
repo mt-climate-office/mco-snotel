@@ -45,6 +45,7 @@ resource "aws_ecs_task_definition" "pipeline" {
         { name = "WORK_DIR",           value = "/tmp/snotel" },
         { name = "KEEP_LOCAL",         value = "FALSE" },
         { name = "CORES",              value = tostring(var.container_cores) },
+        { name = "CALC_FIGURES",       value = "TRUE" },
         { name = "AWS_DEFAULT_REGION", value = var.aws_region },
       ]
 

@@ -5,7 +5,10 @@ on:
     branches: [main]
     paths:
       - "Dockerfile"
+      - "R/**"
+      - "src/**"
       - "*.R"
+      - "*.png"
       - ".github/workflows/docker-publish.yml"
   workflow_dispatch:  # allow manual trigger from GitHub UI
 

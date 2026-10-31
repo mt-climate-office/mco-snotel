@@ -35,3 +35,48 @@ resource "aws_scheduler_schedule" "daily" {
     }
   }
 }
+
+# The yearly normals build: the same task, running normals-annual.R instead of
+# the image's default mco-snotel.R. It refetches every station's record,
+# freezes the year before, and builds the new water year's normals.
+resource "aws_scheduler_schedule" "normals_annual" {
+  name       = "${var.project_name}-normals-annual"
+  group_name = "default"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  schedule_expression          = var.normals_schedule  # cron(0 14 1 10 ? *)
+  schedule_expression_timezone = var.schedule_timezone # America/Denver
+
+  target {
+    arn      = aws_ecs_cluster.pipeline.arn
+    role_arn = aws_iam_role.scheduler.arn
+
+    # RunTask overrides.
+    input = jsonencode({
+      containerOverrides = [{
+        name    = "snotel-pipeline"
+        command = ["normals-annual.R"]
+      }]
+    })
+
+    ecs_parameters {
+      task_definition_arn = aws_ecs_task_definition.pipeline.arn
+      launch_type         = "FARGATE"
+      task_count          = 1
+
+      network_configuration {
+        assign_public_ip = var.assign_public_ip
+        subnets          = local.resolved_subnet_ids
+        security_groups  = local.fargate_security_group_ids
+      }
+    }
+
+    retry_policy {
+      maximum_retry_attempts       = 1
+      maximum_event_age_in_seconds = 3600
+    }
+  }
+}

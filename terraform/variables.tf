@@ -64,6 +64,12 @@ variable "schedule_time" {
   default     = "cron(0 10 * * ? *)" # 10:00 AM daily — SNOTEL obs finalize by ~8 AM MST
 }
 
+variable "normals_schedule" {
+  description = "Cron expression for the yearly normals build, evaluated in schedule_timezone"
+  type        = string
+  default     = "cron(0 14 1 10 ? *)" # Oct 1, 2 PM: after the daily run ingests Sep 30
+}
+
 variable "schedule_timezone" {
   description = "IANA timezone for the schedule"
   type        = string
@@ -73,13 +79,13 @@ variable "schedule_timezone" {
 variable "fargate_cpu" {
   description = "Fargate task CPU units (1 vCPU = 1024). Must be one of: 256, 512, 1024, 2048, 4096, 8192, 16384"
   type        = number
-  default     = 1024 # 1 vCPU — tabular data only
+  default     = 4096 # 4 vCPU — parallel plotting
 }
 
 variable "fargate_memory" {
   description = "Fargate task memory in MiB."
   type        = number
-  default     = 4096 # 4 GB
+  default     = 16384 # 16 GB — the archive is rewritten in memory
 }
 
 variable "fargate_ephemeral_storage_gib" {
@@ -89,7 +95,7 @@ variable "fargate_ephemeral_storage_gib" {
 }
 
 variable "container_cores" {
-  description = "Number of parallel download workers passed to the R pipeline (CORES env var)"
+  description = "Plotting and fitting workers passed to the R pipeline (CORES env var)"
   type        = number
   default     = 4
 }
