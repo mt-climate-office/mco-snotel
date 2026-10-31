@@ -74,11 +74,12 @@ for (period in SNOTEL_PERIODS) {
     dplyr::filter(!is.na(zig_shape))
   if (nrow(z)) {
     direct <- 100 * (z$zig_p_zero + (1 - z$zig_p_zero) * stats::pgamma(z$swe, shape = z$zig_shape, scale = z$zig_scale))
-    ok("ZIG percentiles = p0 + (1 - p0) pgamma(swe)", max(abs(direct - z$swe_ptile)) < 1e-8)
+    # swe_ptile is stored to 0.01, so it matches the exact CDF to within 0.005.
+    ok("ZIG percentiles = p0 + (1 - p0) pgamma(swe), to 0.01", max(abs(round(direct, 2) - z$swe_ptile)) < 1e-8)
     if (requireNamespace("gamlss.dist", quietly = TRUE)) {
       zaga <- 100 * gamlss.dist::pZAGA(z$swe, mu = z$zig_shape * z$zig_scale,
                                        sigma = 1 / sqrt(z$zig_shape), nu = z$zig_p_zero)
-      ok("ZIG percentiles = gamlss.dist::pZAGA", max(abs(zaga - z$swe_ptile)) < 1e-8)
+      ok("ZIG percentiles = gamlss.dist::pZAGA, to 0.01", max(abs(zaga - z$swe_ptile)) <= 0.005 + 1e-8)
     }
   }
   ok("percentiles in [0, 100]", all(pc$swe_ptile >= 0 & pc$swe_ptile <= 100, na.rm = TRUE))

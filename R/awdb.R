@@ -94,9 +94,12 @@ awdb_data <- function(triplets, begin, end, elements = names(AWDB_ELEMENTS)) {
     if (!NROW(d)) return(NULL)
     purrr::map2(d$stationElement$elementCode, d$values, \(el, v) {
       if (!NROW(v)) return(NULL)
+      # An element can come back with dates and flags but no values at all
+      # (e.g. precipitation at a station whose gauge is flagged); its days are
+      # kept with their flags and a missing value.
       tibble::tibble(triplet = trip, element = el,
                      date  = lubridate::as_date(v$date),
-                     value = as.numeric(v$value),
+                     value = if (is.null(v$value)) NA_real_ else as.numeric(v$value),
                      qc    = if (is.null(v$qcFlag)) NA_character_ else as.character(v$qcFlag),
                      qa    = if (is.null(v$qaFlag)) NA_character_ else as.character(v$qaFlag))
     }) |> purrr::list_rbind()
