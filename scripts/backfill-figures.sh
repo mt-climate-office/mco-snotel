@@ -52,18 +52,54 @@ running() {
     --profile "$PROFILE" --query 'length(taskArns)' --output text
 }
 
+# RUNNING once the task has started; otherwise why it stopped before starting.
+started() {
+  local s r
+  for _ in $(seq 60); do
+    read -r s r < <(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$1" --profile "$PROFILE" \
+      --query 'tasks[0].[lastStatus, stoppedReason]' --output text)
+    case "$s" in
+      RUNNING|DEACTIVATING) echo RUNNING; return ;;
+      # Started and already exited: counted as launched; a rerun of this
+      # script redoes its dates if they did not finish.
+      STOPPED|DEPROVISIONING)
+        if [[ "$r" == Essential* ]]; then echo RUNNING; else echo "${r:-stopped}"; fi
+        return ;;
+    esac
+    sleep 10
+  done
+  echo RUNNING
+}
+
 for (( i = 0; i < ${#PENDING[@]}; i += PER_TASK )); do
   batch="$(IFS=,; echo "${PENDING[*]:i:PER_TASK}")"
-  while (( $(running) >= MAX_RUNNING )); do sleep 60; done
-  arn="$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_DEF" \
-    --launch-type FARGATE \
-    --started-by "$STARTED_BY" \
-    --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
-    --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER\",\"command\":[\"viz.R\"],
-                  \"environment\":[{\"name\":\"VIZ_DATES\",\"value\":\"$batch\"},
-                                   {\"name\":\"VIZ_PERIODS\",\"value\":\"$VIZ_PERIODS\"}]}]}" \
-    --profile "$PROFILE" --query 'tasks[0].taskArn' --output text)"
-  echo "$(date '+%H:%M:%S') launched ${batch%%,*} … ${batch##*,}: ${arn##*/}"
+  # A launch can fail when the shared subnets are out of addresses; wait and
+  # retry the same batch rather than skipping it.
+  while :; do
+    while (( $(running) >= MAX_RUNNING )); do sleep 60; done
+    out="$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$TASK_DEF" \
+      --launch-type FARGATE \
+      --started-by "$STARTED_BY" \
+      --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
+      --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER\",\"command\":[\"viz.R\"],
+                    \"environment\":[{\"name\":\"VIZ_DATES\",\"value\":\"$batch\"},
+                                     {\"name\":\"VIZ_PERIODS\",\"value\":\"$VIZ_PERIODS\"}]}]}" \
+      --profile "$PROFILE" --query '[tasks[0].taskArn, failures[0].reason]' --output text)" || out="None	run-task error"
+    arn="${out%%$'\t'*}"
+    reason="${out#*$'\t'}"
+    if [[ "$arn" != "None" && -n "$arn" ]]; then
+      # A task can be accepted and then stop before it starts (e.g.
+      # InsufficientFreeAddressesInSubnet), so wait until it is running.
+      status="$(started "$arn")"
+      if [[ "$status" == "RUNNING" ]]; then
+        echo "$(date '+%H:%M:%S') launched ${batch%%,*} … ${batch##*,}: ${arn##*/}"
+        break
+      fi
+      reason="$status"
+    fi
+    echo "$(date '+%H:%M:%S') launch failed for ${batch%%,*} … ${batch##*,} (${reason}); retrying in 2 min"
+    sleep 120
+  done
   sleep 5
 done
 
