@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # normals-annual.R — yearly SNOTEL normals build
 #
-# Runs on Oct 1, after the nightly run has ingested Sep 30:
+# Runs on Oct 1, after the daily run has ingested Sep 30:
 #   1. stage_stations()          refresh station metadata
 #   2. archive_refresh_full()    refetch every station's whole record from
 #                                AWDB, picking up a year of NRCS edits

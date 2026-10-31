@@ -12,7 +12,7 @@ Base URL: **`https://data2.climate.umt.edu/snotel/`** (CloudFront in front of th
 - CORS: any origin may `GET`; `Content-Range`, `ETag`, `Accept-Ranges` and
   `Content-Length` are exposed, so Parquet range requests work from the browser.
 - Responses are cached by CloudFront. `latest/` is cached for up to an hour, other paths
-  for up to a day, so read tonight's values from `latest/`.
+  for up to a day, so read today's values from `latest/`.
 - Do not read from the raw S3 endpoint; its CORS allows only the CDN.
 
 ## Finding the current date
@@ -21,9 +21,9 @@ Base URL: **`https://data2.climate.umt.edu/snotel/`** (CloudFront in front of th
    water year; `updated` is when it was published (UTC); `normals` maps each period to its
    normals folder; `plots`, if present, is that date's plot folder.
 2. Read this water year's observed SWE and percentiles from `latest/observed_{period}.parquet`.
-   They are rewritten whole each night, since NRCS edits recent values.
+   They are rewritten whole each day, since NRCS edits recent values.
 
-The manifest updates after the nightly run (about 10–11 AM Mountain). On Oct 1 the new
+The manifest updates after the daily run (about 10–11 AM Mountain). On Oct 1 the new
 water year has no normals until the yearly build finishes that afternoon.
 
 ## Paths
@@ -75,7 +75,7 @@ date for every station without the whole year.
 
 Before linking to a date's plots, check that `plots/{d}/index.json` exists and lists the
 period in `periods`: it is written after the plots, so it marks the date as complete. The
-nightly run plots `snodas`; other periods are plotted on request. A station's flavors
+daily run plots `snodas`; other periods are plotted on request. A station's flavors
 share their SWE axis and every plot has the same frame, so swapping the image in place
 changes only the data. Plots are 1500 × 1000 px; display them at about
 600–1200 CSS px wide. Stations with too short a record show their SWE without normals.

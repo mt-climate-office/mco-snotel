@@ -12,7 +12,7 @@ PNG. Every plot uses the same 256 colours as the SNODAS plots, so shared element
 legends match exactly.
 
 `<station>` is the station triplet with `_` for `:` (`901_MT_SNTL`). `<period>` is `30yr`,
-`snodas` or `por` (see `../normals/`); the nightly run plots `snodas`, and other periods
+`snodas` or `por` (see `../normals/`); the daily run plots `snodas`, and other periods
 are plotted on request. `<flavor>` is `ecdf` (Empirical History), `zig` (Fitted History) or
 `zig_smooth` (Smoothed History). A station's three flavors share their SWE axis, and every
 plot has the same frame, so they can be swapped in place. Every station with SWE in the

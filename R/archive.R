@@ -3,7 +3,7 @@
 # Station metadata lives in stations/stations.parquet, not on every row.
 #
 # The whole record is refetched from AWDB once a year (archive_refresh_full(),
-# run by normals-annual.R) to pick up a year of NRCS edits. Each night the
+# run by normals-annual.R) to pick up a year of NRCS edits. Each day the
 # current water year is refetched and replaces those rows (archive_refresh()).
 # AWDB leaves out values marked suspect, so a value NRCS later flags drops out
 # of the archive on the next refresh that covers its date.

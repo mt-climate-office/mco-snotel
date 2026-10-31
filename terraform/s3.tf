@@ -67,24 +67,6 @@ resource "aws_s3_bucket_cors_configuration" "outputs" {
   }
 }
 
-# Plots are a permanent dated archive (~2,800 a night at ~80 KB, ~80 GB a
-# year). After a year they move to Standard-IA, as mco-snodas's do: instantly
-# readable, a small per-GB retrieval fee. The age is from upload, so
-# backfilled plots move a year after upload.
-resource "aws_s3_bucket_lifecycle_configuration" "outputs" {
-  bucket = aws_s3_bucket.outputs.id
-
-  rule {
-    id     = "plots-to-standard-ia"
-    status = "Enabled"
-
-    filter {
-      prefix = "plots/"
-    }
-
-    transition {
-      days          = 365
-      storage_class = "STANDARD_IA"
-    }
-  }
-}
+# No lifecycle transition for plots/: at ~75 KB each they are under S3's
+# 128 KB minimum for moving to Standard-IA (and IA would bill each as 128 KB),
+# so the rule mco-snodas uses for its larger plots would do nothing here.

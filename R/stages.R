@@ -14,7 +14,7 @@ PARQUET_TYPE <- "application/vnd.apache.parquet"
 SNOTEL_PLOT_FLAVORS <- c(ecdf = "Empirical History", zig = "Fitted History",
                          zig_smooth = "Smoothed History")
 
-# Periods plotted every night; viz.R plots others on request.
+# Periods plotted every day; viz.R plots others on request.
 SNOTEL_PLOT_PERIODS <- "snodas"
 
 normals_prefix <- function(period, wy) file.path(S3_PREFIX_NORMALS, period, paste0("wy", wy))
@@ -251,7 +251,7 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
     }
 
     # Forked workers inherit the data and functions. A failed station is
-    # logged, not fatal, so one odd station cannot block the night's plots.
+    # logged, not fatal, so one odd station cannot block the day's plots.
     t0 <- Sys.time()
     chunks  <- split(todo, (seq_along(todo) - 1L) %% max(1L, cores))
     results <- parallel::mclapply(chunks, \(ts) {
@@ -299,7 +299,7 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
 
 #' Copy the current tables into latest/ (server-side) and write
 #' latest/manifest.json. latest/ is cached briefly by the CDN, so consumers
-#' that want tonight's values read it rather than the dated paths.
+#' that want today's values read it rather than the dated paths.
 stage_publish <- function(date) {
   date <- lubridate::as_date(date)
   wy   <- water_year(date)

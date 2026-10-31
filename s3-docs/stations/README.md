@@ -1,7 +1,7 @@
 # SNOTEL stations
 
 `stations.parquet`: one row per SNOTEL station in NRCS's Air and Water Database, active and
-retired, refreshed nightly.
+retired, refreshed daily.
 
 | Column | Contents |
 |--------|----------|
