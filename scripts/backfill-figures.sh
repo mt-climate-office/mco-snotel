@@ -4,10 +4,18 @@
 # already lists every period in VIZ_PERIODS are skipped (FORCE=true redoes
 # them), so a rerun fills only the gaps.
 #
+# The shared subnets have few free addresses, so throughput comes from task
+# size, not task count: each task gets TASK_CPU (default 16 vCPU, the Fargate
+# maximum) and plots CORES stations at once. DATES_PER_TASK=auto splits the
+# dates evenly over MAX_RUNNING tasks, so every task launches at once and runs
+# to the end without this script (or the machine running it) staying up.
+#
 # The dates' water years need their normals and percentiles in S3.
 #
-# Usage: [VIZ_PERIODS=snodas] scripts/backfill-figures.sh START END [DATES_PER_TASK] [MAX_RUNNING]
+# Usage: [VIZ_PERIODS=snodas] [TASK_CPU=16384 TASK_MEMORY=32768 CORES=16] \
+#          scripts/backfill-figures.sh START END [DATES_PER_TASK|auto] [MAX_RUNNING]
 #   e.g. scripts/backfill-figures.sh 2026-10-01 2026-10-30 5 4
+#        scripts/backfill-figures.sh 2024-10-01 2026-10-29 auto 3
 #        VIZ_PERIODS=30yr,por scripts/backfill-figures.sh 2026-10-01 2026-10-30
 set -euo pipefail
 
@@ -23,6 +31,7 @@ STARTED_BY="viz-backfill"
 START="$1"; END="$2"; PER_TASK="${3:-5}"; MAX_RUNNING="${4:-4}"
 FORCE="${FORCE:-false}"
 VIZ_PERIODS="${VIZ_PERIODS:-snodas}"
+TASK_CPU="${TASK_CPU:-16384}"; TASK_MEMORY="${TASK_MEMORY:-32768}"; CORES="${CORES:-16}"
 
 # viz.R uploads index.json last, so a period listed in it is done.
 done_for() {
@@ -44,6 +53,8 @@ for d in "${ALL[@]}"; do
   if [[ "$FORCE" != "true" ]] && done_for "$d"; then continue; fi
   PENDING+=("$d")
 done
+[[ "$PER_TASK" == auto ]] && PER_TASK=$(( (${#PENDING[@]} + MAX_RUNNING - 1) / MAX_RUNNING ))
+(( PER_TASK > 0 )) || PER_TASK=1
 echo "${#ALL[@]} date(s) in range; ${#PENDING[@]} to plot ($VIZ_PERIODS), $PER_TASK per task, up to $MAX_RUNNING running."
 [[ ${#PENDING[@]} -eq 0 ]] && exit 0
 
@@ -81,9 +92,11 @@ for (( i = 0; i < ${#PENDING[@]}; i += PER_TASK )); do
       --launch-type FARGATE \
       --started-by "$STARTED_BY" \
       --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
-      --overrides "{\"containerOverrides\":[{\"name\":\"$CONTAINER\",\"command\":[\"viz.R\"],
+      --overrides "{\"cpu\":\"$TASK_CPU\",\"memory\":\"$TASK_MEMORY\",
+                    \"containerOverrides\":[{\"name\":\"$CONTAINER\",\"command\":[\"viz.R\"],
                     \"environment\":[{\"name\":\"VIZ_DATES\",\"value\":\"$batch\"},
-                                     {\"name\":\"VIZ_PERIODS\",\"value\":\"$VIZ_PERIODS\"}]}]}" \
+                                     {\"name\":\"VIZ_PERIODS\",\"value\":\"$VIZ_PERIODS\"},
+                                     {\"name\":\"CORES\",\"value\":\"$CORES\"}]}]}" \
       --profile "$PROFILE" --query '[tasks[0].taskArn, failures[0].reason]' --output text)" || out="None	run-task error"
     arn="${out%%$'\t'*}"
     reason="${out#*$'\t'}"
