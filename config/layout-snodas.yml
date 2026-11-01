@@ -36,6 +36,10 @@ artifacts:
   raw_tar:              "raw/SNODAS_{compact_date}.tar"
   raw_cog:              "cogs/{date}/snodas_{var}_{compact_date}.tif"
   raw_manifest:         {template: "manifest.parquet", cache: short, note: "v0 only; catalog of tars and COGs"}
+  # Left by an earlier version (mco-snodas ef78dc2, March 2026); no code reads or
+  # writes them. raw/tar/SNODAS_20260318.tar sits at a layout_version 1 raw_tar key.
+  raw_tar_legacy:       {template: "raw/tar/SNODAS_{compact_date}.tar", cache: long, note: "legacy, read-only"}
+  raw_tar_manifest_legacy: {template: "raw/tar.manifest.parquet", cache: short, note: "legacy, read-only"}
 
   # Gridded normals, one folder per flavor and date
   normals_grid:         {template: "normals/gridded/{flavor}/{date}/{date}_{flavor}_{stat}.tif",

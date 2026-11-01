@@ -311,6 +311,8 @@ if (!is.null(snodas_file)) {
   roundtrip(S, "animations/sy2026/zig_smooth/hypsomeswe/usdm/01010002.mp4", "animation_sy",
             wy = 2026, flavor = "smoothed", type = "hypsomeswe", subject = "01010002")
   roundtrip(S, "animations/sy2026/ecdf/index.json", "animation_index_sy", wy = 2026, flavor = "ecdf")
+  roundtrip(S, "raw/tar/SNODAS_20260318.tar", "raw_tar_legacy", date = "2026-03-18")
+  roundtrip(S, "raw/tar.manifest.parquet", "raw_tar_manifest_legacy")
 
   # Roles: the reference dates of the yearly build (normals_annual.R:125-128,
   # pipeline_sync.R:231-234): d minus 0..30 years, from 2003-09-30, before
@@ -410,11 +412,15 @@ if (file.exists("scripts/layout/v1-snotel.yml")) {
   check("v1 30yr = snodas in 2035", layout_period("30yr", 2035, D1)$period, layout_period("snodas", 2035, D1)$period)
 
   # v0 and v1 must not collide. cache/v1/ sits inside v0's cache/ prefix,
-  # which v0 never writes under (plan step 3.0).
-  for (pair in list(list(snotel_file, T1), list(snodas_file, D1))) {
-    if (is.null(pair[[1]])) next
-    ov <- layout_overlaps(layout_load(pair[[1]]), pair[[2]])
-    check(paste("v0/v1 overlaps", pair[[1]]), paste(ov$artifact, ov$other), "cache cache")
+  # which v0 never writes under (plan step 3.0). In mco-snodas, one leftover
+  # object (raw/tar/SNODAS_20260318.tar, raw_tar_legacy) already has a v1
+  # raw_tar key; the history copy (step 3E) must expect it.
+  ov_want <- list(snotel = "cache cache",
+                  snodas = c("raw_tar_legacy raw_tar", "raw_tar raw_tar_legacy", "cache cache"))
+  for (pair in list(list("snotel", snotel_file, T1), list("snodas", snodas_file, D1))) {
+    if (is.null(pair[[2]])) next
+    ov <- layout_overlaps(layout_load(pair[[2]]), pair[[3]])
+    check(paste("v0/v1 overlaps", pair[[1]]), paste(ov$artifact, ov$other), ov_want[[pair[[1]]]])
   }
 }
 

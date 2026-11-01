@@ -30,11 +30,12 @@ Sites are table rows below: code, scripts, infrastructure and docs, including co
 |---|---|---|
 | mco-snotel (main) | 86 | 18 |
 | mco-snotel [outlook] | 16 more | 19 (adds `outlook`; `latest_copy` gains `artifact = "outlook"`) |
-| mco-snodas | 172 | 35 (33 written by code, plus 2 legacy read-only: `animations/sy2026/`) |
+| mco-snodas | 172 | 37 (33 written by code, plus 4 legacy read-only: `animations/sy2026/`, `raw/tar/`, `raw/tar.manifest.parquet`) |
 | Shared `scripts/parity/seed.sh` | 21 (both projects) | in both counts |
 
 **Real keys.** All 923,752 keys in `s3://mco-snotel` belong to exactly one v0 artifact
-(`scripts/test_layout.R --snotel-listing`). For `s3://mco-snodas`, see that section.
+(`scripts/test_layout.R --snotel-listing`), and so do all 5,316,519 keys in `s3://mco-snodas`
+(`--snodas-listing`), counting four legacy artifacts for objects no code writes.
 
 ---
 
@@ -463,7 +464,11 @@ The header (lines 26-56) describes the same keys.
 9. **Objects no code writes.** `animations/sy2026/` (7,933 MP4s and 3 index files, spec
    section 15 item 3) gets the legacy artifacts `animation_sy` and `animation_index_sy`, so every
    object in the bucket has an artifact. The bucket has no `animations/wy*` yet, although that
-   is what `R/animate.R` writes.
+   is what `R/animate.R` writes. Two more objects come from an earlier version (mco-snodas
+   ef78dc2, March 2026): `raw/tar.manifest.parquet` and `raw/tar/SNODAS_20260318.tar`
+   (`raw_tar_manifest_legacy`, `raw_tar_legacy`). The tar is the same size as
+   `raw/SNODAS_20260318.tar` and **already sits at a layout_version 1 `raw_tar` key**.
+   `layout_overlaps()` reports it, and the history copy (step 3E) must expect it.
 10. **Stage 6 in mco-snodas deletes `latest/README.md`** every night along with the rest of
    `latest/` (step 0G changes this).
 11. **Two `build.json` files**: the build stamp under `normals/build/…` (written, never read)
