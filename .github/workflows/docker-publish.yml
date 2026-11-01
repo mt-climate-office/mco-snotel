@@ -6,6 +6,7 @@ on:
     paths:
       - "Dockerfile"
       - "R/**"
+      - "config/**"
       - "src/**"
       - "*.R"
       - "*.png"

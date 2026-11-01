@@ -6,9 +6,11 @@
 #   2. archive_refresh_full()    refetch every station's whole record from
 #                                AWDB, picking up a year of NRCS edits
 #   3. stage_normals()           freeze the record before the new water year and
-#                                build its normals for every period and flavor
+#                                build its normals for every period and flavor,
+#                                with the outlook's persistence
 #   4. stage_percentiles()       the new water year's SWE so far
-#   5. stage_viz(), stage_publish()  plot and publish the newest date
+#   5. stage_outlook(), stage_viz(), stage_publish()
+#                                the outlook, plots and latest/ for the newest date
 #
 # Environment variables:
 #   WATER_YEAR           Water year to build (default: the one in progress, in
@@ -51,10 +53,13 @@ if (SKIP_REFRESH) {
 stage_normals(wy, periods = periods)
 done <- stage_percentiles(wy, periods = periods)
 
-plots_ok <- TRUE
+plots_ok <- TRUE; outlook_ok <- TRUE
 if (wy == water_year(today)) {
   the_date <- latest_swe_date(today)
   if (!is.na(the_date)) {
+    if (length(done))
+      outlook_ok <- tryCatch({ stage_outlook(the_date, periods = done); TRUE },
+                             error = \(e) { message("  Outlook failed for ", format(the_date), ": ", conditionMessage(e)); FALSE })
     if (CALC_FIGURES && any(SNOTEL_PLOT_PERIODS %in% done))
       plots_ok <- tryCatch({ stage_viz(the_date); TRUE },
                            error = \(e) { message("  Plots failed for ", format(the_date), ": ", conditionMessage(e)); FALSE })
@@ -64,5 +69,6 @@ if (wy == water_year(today)) {
 
 # Normals and tables are published either way; the task exits non-zero so a
 # plotting failure shows in ECS.
+if (!outlook_ok) stop("Outlook failed; normals and tables were published")
 if (!plots_ok) stop("Plots failed; normals and tables were published")
 message("=== SNOTEL normals: done ===")

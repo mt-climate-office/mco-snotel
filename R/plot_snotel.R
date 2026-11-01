@@ -10,9 +10,12 @@
 #' @param normals_label Caption naming the normals, e.g. "Smoothed History".
 #' @param ref_years First and last reference water years, for the legend title.
 #' @param y_max Top of the SWE axis (inches), shared across flavors.
+#' @param outlook The outlook from the plotted date (date, q0100, q0900; see
+#'   R/outlook.R), drawn as the likely range and keyed with the current
+#'   conditions; NULL for none.
 #' @return The plot, wrapped by snodas_legend_row().
 plot_snotel <-
-  function(x, station, normals_label = NULL, ref_years, y_max = NULL) {
+  function(x, station, normals_label = NULL, ref_years, y_max = NULL, outlook = NULL) {
 
     x <- dplyr::arrange(x, date)
     the_record <- x %>% dplyr::filter(!is.na(swe)) %>% dplyr::slice_tail(n = 1)
@@ -40,6 +43,11 @@ plot_snotel <-
       # The outer edges; the median is drawn dashed below.
       dplyr::select(date, `1st percentile` = q0010, `99th percentile` = q0990) %>%
       tidyr::pivot_longer(-date)
+
+    # The likely range starts at the plotted date's SWE, so it joins the line.
+    ol <- if (!is.null(outlook) && nrow(outlook) && length(the_date))
+      dplyr::bind_rows(tibble::tibble(date = the_date, q0100 = the_record$swe, q0900 = the_record$swe),
+                       dplyr::select(outlook, date, q0100, q0900))
 
     title <- paste0("Seasonal SWE for ", station$name, " (", station$site_id, ", ", station$state, ")")
     caption <- paste0(c(normals_label,
@@ -90,6 +98,18 @@ plot_snotel <-
                    expand = expansion(0,0),
                    name = NULL) +
 
+      ## OUTLOOK
+      # The likely range for the rest of the year (10th-90th percentile of the
+      # outlook), with dotted edges so it reads over the classes.
+      {if (!is.null(ol)) list(
+        geom_ribbon(data = ol, mapping = aes(x = date, ymin = q0100, ymax = q0900, linetype = "Likely range"),
+                    fill = "gray15", alpha = 0.22, colour = NA, key_glyph = "rect", na.rm = TRUE),
+        geom_line(data = ol, mapping = aes(x = date, y = q0100), colour = "gray25",
+                  linewidth = 0.3, linetype = "dotted", na.rm = TRUE),
+        geom_line(data = ol, mapping = aes(x = date, y = q0900), colour = "gray25",
+                  linewidth = 0.3, linetype = "dotted", na.rm = TRUE)
+      )} +
+
       ## CURRENT CONDITIONS
       # White halo under the observed line, as on the hypsomeSWE plot.
       geom_line(data = x %>% dplyr::filter(!is.na(swe)),
@@ -100,7 +120,7 @@ plot_snotel <-
                 color = "black", linewidth = 1,
                 lineend = "round") +
       # This year's line and the median, keyed as on the hypsomeSWE plot.
-      snodas_current_legend(obs_lwd = 1) +
+      {if (is.null(ol)) snodas_current_legend(obs_lwd = 1) else snotel_outlook_legend(obs_lwd = 1)} +
 
       {if (snow_free && !no_normals)
         annotation_custom(grid::textGrob(
@@ -127,3 +147,20 @@ plot_snotel <-
       fix_plot_frame(xlab_height = grid::unit(5, "pt")) %>%
       snodas_legend_row()
   }
+
+# snodas_current_legend() (R/plot.R) with the outlook's likely range as a third
+# key: Observed and Median in one column, Likely range beside them, so the
+# legend row keeps its two-row height.
+snotel_outlook_legend <- function(obs_lwd)
+  ggplot2::scale_linetype_manual(
+    name = "Current Conditions",
+    values = c(Observed = "solid", Median = "dashed", `Likely range` = "solid"),
+    limits = c("Observed", "Median", "Likely range"),
+    drop = FALSE,
+    guide = ggplot2::guide_legend(order = 3, title.position = "top", nrow = 2, byrow = FALSE,
+                                  keywidth = grid::unit(24, "pt"),
+                                  override.aes = list(colour = c("black", "gray50", NA),
+                                                      linewidth = c(obs_lwd, 0.5, 0),
+                                                      fill = c(NA, NA, "gray15"),
+                                                      alpha = c(1, 1, 0.22)))
+  )

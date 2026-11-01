@@ -10,11 +10,12 @@
 #                           values, so the whole water year is refetched)
 #   3. stage_percentiles()  this water year's SWE against the frozen normals
 #                           (normals are built yearly by normals-annual.R)
-#   4. stage_viz()          per-station plots for the newest date with SWE
-#   5. stage_publish()      latest/ snapshot and manifest.json
+#   4. stage_outlook()      the outlook from the newest date with SWE to Sep 30
+#   5. stage_viz()          per-station plots for that date, with the outlook
+#   6. stage_publish()      latest/ snapshot and manifest.json
 #
 # On Oct 1 the new water year has no normals until normals-annual.R runs that
-# afternoon, so this run skips Stages 3 and 4.
+# afternoon, so this run skips Stages 3 to 5.
 #
 # Environment variables:
 #   SNOTEL_DATE          Date to plot and publish (default: the newest date
@@ -54,8 +55,13 @@ wy <- water_year(the_date)
 
 done <- stage_percentiles(wy)
 
-# A plotting failure still lets the day's tables publish, but the task exits
-# non-zero so the failure shows in ECS.
+# An outlook or plotting failure still lets the day's tables publish, but the
+# task exits non-zero so the failure shows in ECS.
+outlook_ok <- TRUE
+if (length(done))
+  outlook_ok <- tryCatch({ stage_outlook(the_date, periods = done); TRUE },
+                         error = \(e) { message("  Outlook failed for ", format(the_date), ": ", conditionMessage(e)); FALSE })
+
 plots_ok <- TRUE
 if (CALC_FIGURES && length(done)) {
   plots_ok <- tryCatch({ stage_viz(the_date); TRUE },
@@ -64,5 +70,6 @@ if (CALC_FIGURES && length(done)) {
 
 stage_publish(the_date)
 
+if (!outlook_ok) stop("Outlook failed for ", format(the_date), "; tables were published")
 if (!plots_ok) stop("Plots failed for ", format(the_date), "; tables were published")
 message("=== SNOTEL pipeline: done ===")
