@@ -152,6 +152,7 @@ src/                   Rcpp, vendored from mco-snodas
 scripts/               test_distributions.R, test_stations.R, check-vendored.sh,
                        check-plot-palette.R, backfill-figures.sh,
                        publish-bucket-readmes.sh, run_local.sh, ecr-push.sh
+scripts/parity/        shadow runs: seed.sh, diff.R, check-identical.sh
 s3-docs/               README.md for each bucket directory
 terraform/             AWS infrastructure
 .github/workflows/     image build (docker-publish.yml)
@@ -215,6 +216,56 @@ Builds are tagged `sha-<short commit>` and never `latest`. Every task (daily and
 runs the digest in `terraform/image.auto.tfvars`, so pushing an image deploys nothing. To
 deploy, tag the image `prod-<yyyymmdd>` (the ECR lifecycle policy never expires `prod-*`),
 set `image_digest` to its digest, and `terraform apply`.
+
+## Shadow runs
+
+A shadow run shows that a change leaves the outputs as they are before it reaches
+production: the pipeline runs against the private bucket `mco-snotel-test`, seeded from
+production, and `scripts/parity/diff.R` compares its outputs with production's.
+`terraform/shadow.tf` defines:
+
+- the test bucket: private, versioned, noncurrent versions expire after 30 days;
+- two roles with the same S3 permissions: read production, read and write the test bucket,
+  and an explicit deny on writes and deletes in production. `mco-snotel-shadow-task` is the
+  shadow task's role; `mco-shadow-snotel` is for local work, assumed from the SSO admin role;
+- the task definition `mco-snotel-shadow`: the daily task on Fargate Spot with
+  `S3_BUCKET=mco-snotel-test`, running the image `shadow_image_digest` (production's when unset);
+- the schedule `mco-snotel-shadow`, 13:00 America/Denver, created disabled.
+
+The local profile, in `~/.aws/config` (`role_arn` is the `shadow_local_role_arn` output):
+
+```ini
+[profile mco-shadow-snotel]
+source_profile = mco
+role_arn       = arn:aws:iam::202533506375:role/mco-shadow-snotel
+region         = us-west-2
+```
+
+```bash
+scripts/parity/seed.sh --dry-run 2026-10-30   # the objects a run for the date reads, and their size
+scripts/parity/seed.sh --wipe 2026-10-30      # copy them (server-side); prints the time for --newer-than
+aws ecs run-task --profile mco --cluster mco-snotel --task-definition mco-snotel-shadow \
+  --capacity-provider-strategy capacityProvider=FARGATE_SPOT,weight=1 \
+  --network-configuration 'awsvpcConfiguration={subnets=[subnet-0b687da7eda8bef8f,subnet-09a22817da9991c3c],securityGroups=[sg-0939029739ce88636],assignPublicIp=ENABLED}' \
+  --overrides '{"containerOverrides":[{"name":"snotel-pipeline","environment":[{"name":"SNOTEL_DATE","value":"2026-10-30"}]}]}'
+scripts/parity/diff.R --ref s3://mco-snotel/<prefix> --cand s3://mco-snotel-test/<prefix> --newer-than <seed time>
+scripts/parity/check-identical.sh             # scripts/parity/ matches the other repository's
+```
+
+`seed.sh` (its header lists every key) copies the archive, the water year's frozen
+normals and reference record, and the date's plot index. The run refetches the water year
+from AWDB itself, so compare it with a production run of the same day.
+`diff.R` compares COGs (georeferencing, types, nodata, bands and overviews; integer
+pixels exactly, floating-point pixels to 1e-6 relative), Parquet (schema, row order and keys;
+floating-point columns to 1e-9 relative, exactly where rounded), JSON (ignoring `updated`, `created`,
+`built_at`, `normals_version`, `pipeline`) and PNG (decoded RGBA), reports missing and extra
+keys, and exits 0 only if everything passes. `--newer-than` fails any candidate object the run
+did not rewrite, so point it at outputs, not at the seeded inputs.
+
+`SNOTEL_DATE` sets the date plotted and published; the water year refetched is always the
+current one.
+
+The scripts in `scripts/parity/` are kept byte-identical in mco-snodas and mco-snotel.
 
 ## Data source
 

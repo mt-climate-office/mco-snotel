@@ -115,3 +115,40 @@ variable "log_retention_days" {
   type        = number
   default     = 90
 }
+
+# Shadow runs (shadow.tf)
+
+variable "shadow_s3_bucket_name" {
+  description = "Private test bucket for shadow runs"
+  type        = string
+  default     = "mco-snotel-test"
+}
+
+variable "shadow_image_digest" {
+  description = "Image digest (sha256:...) in this project's ECR repository for the shadow task. Null runs the production image."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.shadow_image_digest == null || can(regex("^sha256:[0-9a-f]{64}$", var.shadow_image_digest))
+    error_message = "shadow_image_digest must be null or sha256:<64 hex digits>."
+  }
+}
+
+variable "shadow_schedule_time" {
+  description = "Cron expression for the shadow run, evaluated in schedule_timezone (the schedule is created DISABLED)"
+  type        = string
+  default     = "cron(0 13 * * ? *)"
+}
+
+variable "shadow_local_role_name" {
+  description = "Name of the role assumed for local shadow work (AWS CLI profile in README). IAM role names are account-wide, so each project has its own."
+  type        = string
+  default     = "mco-shadow-snotel"
+}
+
+variable "shadow_trusted_role_arns" {
+  description = "Role ARN patterns (ArnLike) allowed to assume the local shadow role: the account's SSO admin permission set"
+  type        = list(string)
+  default     = ["arn:aws:iam::202533506375:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_SA-MCO-Admins_*"]
+}
