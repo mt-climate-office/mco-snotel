@@ -1,0 +1,36 @@
+# Sketch of layout_version 1 for mco-snodas: docs/bucket-layout.md section 7,
+# verbatim except cache (cache/v1/, plan step 3.0). A test fixture for
+# scripts/test_layout.R, not a configuration in use. The spec marks this half
+# "to be confirmed in mco-snodas".
+
+layout_version: 1
+bucket: mco-snodas
+year_type: wy
+roles:
+  snodas: {rule: rolling, length: 30, earliest: 2004}   # also SNODAS's period of record
+  30yr:   {rule: rolling, length: 30}                   # differs from snodas from WY2035
+  noaa:   {rule: fixed, periods: [[2011, 2040]], publish_lag: 1}   # from WY2042
+flavors: [empirical, fitted, smoothed]
+types: [swe, hypsomeswe]
+artifacts:
+  raw_tar:            "raw/tar/SNODAS_{compact_date}.tar"
+  raw_cog:            "raw/cog/{date}/snodas_{var}_{date}.tif"
+  subjects:           "zonal/zones.fgb"
+  normals_grid:       "gridded/normals/{period}/{flavor}/{flavor}_{period}_{day}_{stat}.tif"
+  provenance_grid:    "gridded/normals/{period}/provenance_{period}.json"
+  percentile_grid:    "gridded/daily/percentiles/{period}/{date}/{flavor}_{period}_{date}_{stat}.tif"
+  latest_grid:        "gridded/daily/latest/{flavor}_{role}_{stat}.tif"
+  latest_manifest_grid: "gridded/daily/latest/manifest.json"
+  normals_table:      "zonal/normals/{period}/normals_{type}_{period}.parquet"
+  normals_by_subject: "zonal/normals/{period}/by_zone/{subject}_{type}_{period}.parquet"
+  reference:          "zonal/normals/{period}/reference_{type}_{period}.parquet"
+  provenance:         "zonal/normals/{period}/provenance_{period}.json"
+  means:              "zonal/daily/means/means_{type}_wy{wy}.parquet"
+  percentiles:        "zonal/daily/percentiles/{period}/percentiles_{type}_{period}_wy{wy}.parquet"
+  outlook:            "zonal/daily/outlook/{period}/outlook_{type}_{period}_{date}.parquet"
+  plot:               "zonal/daily/plots/{period}/{date}/{flavor}/{subject}_{type}_{period}_{flavor}_{date}.png"
+  plot_index:         "zonal/daily/plots/{period}/{date}/index_{period}_{date}.json"
+  animation:          "zonal/animations/{period}/wy{wy}/{flavor}/{subject}_{type}_{period}_{flavor}_wy{wy}.mp4"
+  latest_copy:        "zonal/daily/latest/{artifact}_{type}_{role}.parquet"
+  latest_manifest:    "zonal/daily/latest/manifest.json"
+  cache:              "cache/v1/"
