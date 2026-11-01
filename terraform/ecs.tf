@@ -10,8 +10,9 @@ resource "aws_ecs_cluster" "pipeline" {
 }
 
 resource "aws_ecs_cluster_capacity_providers" "pipeline" {
-  cluster_name       = aws_ecs_cluster.pipeline.name
-  capacity_providers = ["FARGATE"]
+  cluster_name = aws_ecs_cluster.pipeline.name
+  # FARGATE_SPOT is used only by the shadow task (shadow.tf).
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
 
   default_capacity_provider_strategy {
     capacity_provider = "FARGATE"
