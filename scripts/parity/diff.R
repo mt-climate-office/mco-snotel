@@ -15,7 +15,7 @@
 #                         (UTC, e.g. 2026-11-01T19:00:00Z): outputs the run
 #                         should have rewritten but did not (see seed.sh).
 #   --ignore-json-key K   Also ignore JSON key K (repeatable). Always ignored:
-#                         updated, built_at, normals_version, pipeline.
+#                         updated, created, built_at, normals_version, pipeline.
 #   --profile NAME        AWS CLI profile for s3:// trees (default: AWS_PROFILE).
 #   --out FILE            Also write the table as TSV.
 #   --cores N             Compare N objects at a time (default 1).
@@ -50,7 +50,7 @@ suppressPackageStartupMessages({
 
 TIF_TOL     <- 1e-6
 PARQUET_TOL <- 1e-9
-JSON_IGNORE <- c("updated", "built_at", "normals_version", "pipeline")
+JSON_IGNORE <- c("updated", "created", "built_at", "normals_version", "pipeline")
 
 # ── Arguments ─────────────────────────────────────────────────────────────────
 

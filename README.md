@@ -257,7 +257,7 @@ normals and reference record, and the date's plot index. The run refetches the w
 from AWDB itself, so compare it with a production run of the same day.
 `diff.R` compares COGs (georeferencing, types, nodata, bands and overviews; integer
 pixels exactly, floating-point pixels to 1e-6 relative), Parquet (schema, row order and keys;
-floating-point columns to 1e-9 relative, exactly where rounded), JSON (ignoring `updated`,
+floating-point columns to 1e-9 relative, exactly where rounded), JSON (ignoring `updated`, `created`,
 `built_at`, `normals_version`, `pipeline`) and PNG (decoded RGBA), reports missing and extra
 keys, and exits 0 only if everything passes. `--newer-than` fails any candidate object the run
 did not rewrite, so point it at outputs, not at the seeded inputs.
