@@ -204,19 +204,20 @@ stage_percentiles <- function(wy, periods = SNOTEL_PERIODS, upload = TRUE) {
 # sorted by station with about 50 stations per row group, so a reader can
 # fetch one station's rows by the triplet statistics.
 write_outlook_pq <- function(x, path) {
-  x <- dplyr::arrange(x, triplet, factor(flavor, levels = SNOTEL_FLAVORS), date)
+  x <- dplyr::arrange(x, triplet, date)
   tab <- arrow::arrow_table(x)
   for (nm in c(names(SNODAS_QUANTILES), "p_snow_free")) tab[[nm]] <- tab[[nm]]$cast(arrow::float32())
   fs::dir_create(dirname(path))
   arrow::write_parquet(tab, sink = path, compression = "zstd", compression_level = 13L,
-                       chunk_size = 50L * length(SNOTEL_FLAVORS) * dplyr::n_distinct(x$date))
+                       chunk_size = 50L * dplyr::n_distinct(x$date))
   s3_mark_fresh(path)
   invisible(path)
 }
 
-#' The outlook from one date to the end of its water year, every period:
-#' normals/{period}/outlook/wy{wy}/{date}.parquet (R/outlook.R). Every day's
-#' outlook is kept, so the forecasts can be checked against what happened.
+#' The outlook from one date to the end of its water year, every period, from
+#' the smoothed normals: normals/{period}/outlook/wy{wy}/{date}.parquet
+#' (R/outlook.R). Every day's outlook is kept, so the forecasts can be checked
+#' against what happened.
 #'
 #' @return The periods written (none if the normals have no outlook columns
 #'   yet, or the date has no SWE).
@@ -306,7 +307,7 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
         xs <- x[x$flavor == fl, ]
         snodas_save_png(plot_snotel(xs, st, normals_label = SNOTEL_PLOT_FLAVORS[[fl]],
                                     ref_years = ref_years, y_max = if (y_max > 0) y_max,
-                                    outlook = if (!is.null(ol)) ol[ol$flavor == fl, ]),
+                                    outlook = ol),   # the smoothed outlook, on every flavor
                         file.path(out_root, period, fl, "swe", "usdm", paste0(st$station, ".png")))
       }
       invisible(TRUE)
@@ -361,7 +362,7 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
 # stage_outlook() wrote one, otherwise computed here from the observed table's
 # SWE (e.g. for a backfilled date). NULL if the normals have no outlook columns.
 outlook_for_plots <- function(period, date, observed) {
-  cols <- c("flavor", "date", "triplet", "q0100", "q0900")
+  cols <- c("date", "triplet", "q0100", "q0900")
   path <- s3_local(outlook_key(period, date), refresh = FALSE)
   if (!is.null(path)) return(arrow::read_parquet(path, col_select = dplyr::all_of(cols)))
   wy  <- water_year(date)

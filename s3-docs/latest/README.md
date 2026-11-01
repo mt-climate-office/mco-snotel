@@ -20,7 +20,7 @@ date with SWE and lists every file.
 |------|----------|
 | `stations.parquet` | Station metadata (see `../stations/`) |
 | `observed_<period>.parquet` | Every station's observed SWE and percentiles for the water year, to date (see `../normals/`) |
-| `outlook_<period>.parquet` | The outlook from `date` to Sep 30, every station and flavor (see `../normals/`) |
+| `outlook_<period>.parquet` | The outlook from `date` to Sep 30, every station (see `../normals/`) |
 
 `normals` gives each period's normals folder for the water year; `outlook` gives each
 period's dated outlook file, of which `outlook_<period>.parquet` is a copy. `plots`, when present, is

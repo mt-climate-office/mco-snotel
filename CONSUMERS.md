@@ -75,13 +75,13 @@ date for every station without the whole year.
 
 ## Outlook
 
-The outlook is the likely SWE for the rest of the water year, from the newest date. Show
-its likely range as `q0100`–`q0900` (the plots shade it gray), and use the same period and
-flavor as the normals beside it. It is statistical, not a weather forecast: it carries the
+The outlook is the likely SWE for the rest of the water year, from the newest date, read
+from the period's smoothed normals. Show its likely range as `q0100`–`q0900` (the plots
+shade it gray, on every flavor's plot), and use the same period as the normals beside it. It is statistical, not a weather forecast: it carries the
 station's current percentile forward, fading toward normal, and is reissued every day.
 `p_snow_free` is the chance a date is bare, which gives a melt-out outlook. Rows are sorted
 by station, so a reader that skips row groups by their `triplet` statistics can fetch one
-station's outlook (up to about 1,100 rows) without the whole file.
+station's outlook (up to 365 rows) without the whole file.
 
 ## Plots
 

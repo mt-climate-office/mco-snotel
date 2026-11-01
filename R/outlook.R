@@ -1,7 +1,8 @@
 # SWE outlook: the likely range of SWE for the rest of the water year, read
-# from each flavor's own normals.
+# from the smoothed normals (zig_smooth, OUTLOOK_FLAVOR) of each period. One
+# outlook per station and period; every flavor's plot shows it.
 #
-# Today's SWE is placed in the flavor's distribution for today (its percentile,
+# Today's SWE is placed in the smoothed distribution for today (its percentile,
 # as in normals/{period}/observed/), and that percentile is carried forward on
 # the standard-normal scale, fading toward normal:
 #
@@ -9,17 +10,19 @@
 #   rho(h) = exp(-(h / l)^alpha)                         h days ahead
 #   q_p    = Q_target(pnorm(rho z0 + qnorm(p) sqrt(1 - rho^2)))
 #
-# where F and Q are the flavor's distribution function and quantile function
-# (the vendored ecdf_p / ecdf_q and zig_p / zig_q, ECDF fallback included), so
-# the outlook keeps the normals' shape and melts out with them.
+# where F and Q are the smoothed distribution function and quantile function
+# (the vendored zig_p / zig_q, ECDF fallback included), so the outlook keeps
+# the normals' shape and melts out with them. The helpers below take a flavor,
+# so a hindcast can try the others.
 #
-#   l      the persistence length, fitted per station, flavor and issue date
-#          in the annual build from the reference years' own z series
-#          (outlook_lengths()), and stored in the normals as outlook_length.
+#   l      the persistence length, fitted per station and issue date in the
+#          annual build from the reference years' own z series
+#          (outlook_lengths()), and stored on the zig_smooth rows of the
+#          normals as outlook_length.
 #   alpha  the persistence shape: 1 widens fast from the start, 2 starts
-#          narrow and fans out later. Calibrated by period, flavor and day of
-#          the year from a hindcast (config/outlook_alpha.csv), and stored in the
-#          normals as outlook_alpha.
+#          narrow and fans out later. Calibrated by period and day of the year
+#          from a hindcast (config/outlook_alpha.csv), and stored with
+#          outlook_length as outlook_alpha.
 #
 # A fitted chance of no snow below half a reference year (0.5 / n_valid) is
 # taken as zero: the smoothed fit never reaches exactly zero, and a record-low
@@ -31,6 +34,7 @@
 # relaxes to the normals as rho fades (outlook_anchor()). Within the
 # distribution the ratio is about 1.
 
+OUTLOOK_FLAVOR     <- "zig_smooth"
 OUTLOOK_ALPHA_FILE <- "config/outlook_alpha.csv"
 OUTLOOK_FIT_LAGS   <- c(3, 7, 14, 21, 30, 45, 60, 90, 120)   # days, for fitting l
 OUTLOOK_POOL_DAYS  <- 15L    # issue dates pooled either side when fitting l
@@ -47,9 +51,9 @@ outlook_alpha_table <- local({
   }
 })
 
-#' alpha for a period and flavor on the given dates (Feb 29 between Feb 28 and
-#' Mar 1, as normals_cycle_day()).
-outlook_alpha <- function(period, flavor, dates, table = outlook_alpha_table()) {
+#' alpha for a period on the given dates (Feb 29 between Feb 28 and Mar 1, as
+#' normals_cycle_day()).
+outlook_alpha <- function(period, dates, flavor = OUTLOOK_FLAVOR, table = outlook_alpha_table()) {
   x <- table[table$period == period & table$flavor == flavor, ]
   if (!nrow(x)) stop("No outlook alpha for ", period, " / ", flavor, " in ", OUTLOOK_ALPHA_FILE)
   x <- x[order(x$day), ]
@@ -123,7 +127,8 @@ outlook_rowcor <- function(a, b) {
   r
 }
 
-#' Lag correlations of the reference years' z, per flavor.
+#' Lag correlations of the reference years' z, per flavor (by default only
+#' OUTLOOK_FLAVOR).
 #'
 #' Each reference year's SWE is placed in the flavor's distribution for its
 #' date (z, clamped to +-4), and z's correlation across years between each date
@@ -134,11 +139,11 @@ outlook_rowcor <- function(a, b) {
 #' @param years   The period's reference years.
 #' @return list(dates, stations, cors = list by flavor of n_station x n_dates x
 #'   n_lags arrays).
-outlook_correlations <- function(sm, normals, years) {
+outlook_correlations <- function(sm, normals, years, flavors = OUTLOOK_FLAVOR) {
   dates <- sort(unique(normals$date)); L <- length(dates)
   hs <- lapply(dates, \(d) reference_record(sm, d, years))
   by_date <- split(normals, normals$date)
-  cors <- purrr::map(stats::setNames(SNOTEL_FLAVORS, SNOTEL_FLAVORS), \(fl) {
+  cors <- purrr::map(stats::setNames(flavors, flavors), \(fl) {
     Z <- lapply(seq_len(L), \(t) {
       nf <- by_date[[format(dates[t])]]; nf <- nf[nf$flavor == fl, ]; nf <- nf[match(sm$stations, nf$triplet), ]
       h  <- hs[[t]]
@@ -185,30 +190,31 @@ outlook_fit_lengths <- function(cr, alpha) {
   len
 }
 
-#' Persistence lengths and shapes for every station, flavor and date of one
-#' period's normals, with alpha from config/outlook_alpha.csv.
+#' Persistence lengths and shapes for every station and date of one period's
+#' smoothed normals, with alpha from config/outlook_alpha.csv.
 #'
-#' @return flavor, date, triplet, outlook_length (days), outlook_alpha.
+#' @return flavor (OUTLOOK_FLAVOR), date, triplet, outlook_length (days),
+#'   outlook_alpha.
 outlook_lengths <- function(sm, normals, years, period) {
   oc <- outlook_correlations(sm, normals, years)
   L  <- length(oc$dates); n <- length(oc$stations)
-  purrr::map(SNOTEL_FLAVORS, \(fl) {
-    alpha <- outlook_alpha(period, fl, oc$dates)
-    len   <- outlook_fit_lengths(oc$cors[[fl]], alpha)
-    tibble::tibble(flavor = fl, date = rep(oc$dates, each = n), triplet = rep(oc$stations, L),
-                   outlook_length = round(as.vector(len), 2), outlook_alpha = rep(round(alpha, 3), each = n))
-  }) |> purrr::list_rbind()
+  alpha <- outlook_alpha(period, oc$dates)
+  len   <- outlook_fit_lengths(oc$cors[[OUTLOOK_FLAVOR]], alpha)
+  tibble::tibble(flavor = OUTLOOK_FLAVOR, date = rep(oc$dates, each = n), triplet = rep(oc$stations, L),
+                 outlook_length = round(as.vector(len), 2), outlook_alpha = rep(round(alpha, 3), each = n))
 }
 
-#' The outlook from one issue date to the end of its water year, one period.
+#' The outlook from one issue date to the end of its water year, one period,
+#' from the smoothed normals.
 #'
 #' @param sm      swe_matrix() of the frozen reference record.
-#' @param normals The period's normals, with outlook_length and outlook_alpha.
+#' @param normals The period's normals, with outlook_length and outlook_alpha
+#'   on the OUTLOOK_FLAVOR rows.
 #' @param years   The period's reference years.
 #' @param obs     triplet and wteq on the issue date (stations without a value
 #'   are left out).
 #' @param issue   The issue date.
-#' @return flavor, date, triplet, q0000 ... q1000 (the normals' 19 quantile
+#' @return date, triplet, q0000 ... q1000 (the normals' 19 quantile
 #'   probabilities; 0 and 1 are read at z = -4 and 4) and p_snow_free (the
 #'   chance of no snow on that date), for every date after the issue date
 #'   through Sep 30. NULL if the normals have no outlook columns.
@@ -222,27 +228,26 @@ calc_station_outlook <- function(sm, normals, years, obs, issue) {
   if (!length(targets)) return(NULL)
   by_date <- split(normals, normals$date)
   zq <- stats::qnorm(pmin(pmax(unname(SNODAS_QUANTILES), stats::pnorm(-OUTLOOK_Z_MAX)), stats::pnorm(OUTLOOK_Z_MAX)))
-  rows_for <- \(d, fl) { nf <- by_date[[format(d)]]; nf <- nf[nf$flavor == fl, ]; nf[match(obs$triplet, nf$triplet), ] }
+  fl <- OUTLOOK_FLAVOR
+  rows_for <- \(d) { nf <- by_date[[format(d)]]; nf <- nf[nf$flavor == fl, ]; nf[match(obs$triplet, nf$triplet), ] }
 
-  purrr::map(SNOTEL_FLAVORS, \(fl) {
-    n0 <- rows_for(issue, fl)
-    h0 <- reference_record(sm, issue, years)[i, , drop = FALSE]
-    z0 <- pmin(pmax(stats::qnorm(outlook_cdf(fl, n0, h0, obs$wteq)), -OUTLOOK_Z_MAX), OUTLOOK_Z_MAX)
-    anchor <- outlook_anchor(fl, n0, h0, z0, obs$wteq)
-    purrr::map(targets, \(d) {
-      nt  <- rows_for(d, fl)
-      ht  <- reference_record(sm, d, years)[i, , drop = FALSE]
-      rho <- exp(-(as.numeric(d - issue) / n0$outlook_length)^n0$outlook_alpha)
-      sg  <- sqrt(pmax(1e-12, 1 - rho^2))
-      u   <- stats::pnorm(rho * z0 + outer(sg, zq))
-      q   <- round(outlook_quantiles(fl, nt, ht, u) * anchor^rho, 1)
-      colnames(q) <- names(SNODAS_QUANTILES)
-      p0  <- outlook_p_zero(fl, nt, ht)
-      psf <- ifelse(p0 > 0, stats::pnorm((stats::qnorm(p0) - rho * z0) / sg), 0)
-      tibble::tibble(flavor = fl, date = d, triplet = obs$triplet, tibble::as_tibble(q),
-                     p_snow_free = round(psf, 3))[!is.na(z0) & !is.na(n0$outlook_length), ]
-    }) |> purrr::list_rbind()
+  n0 <- rows_for(issue)
+  h0 <- reference_record(sm, issue, years)[i, , drop = FALSE]
+  z0 <- pmin(pmax(stats::qnorm(outlook_cdf(fl, n0, h0, obs$wteq)), -OUTLOOK_Z_MAX), OUTLOOK_Z_MAX)
+  anchor <- outlook_anchor(fl, n0, h0, z0, obs$wteq)
+  purrr::map(targets, \(d) {
+    nt  <- rows_for(d)
+    ht  <- reference_record(sm, d, years)[i, , drop = FALSE]
+    rho <- exp(-(as.numeric(d - issue) / n0$outlook_length)^n0$outlook_alpha)
+    sg  <- sqrt(pmax(1e-12, 1 - rho^2))
+    u   <- stats::pnorm(rho * z0 + outer(sg, zq))
+    q   <- round(outlook_quantiles(fl, nt, ht, u) * anchor^rho, 1)
+    colnames(q) <- names(SNODAS_QUANTILES)
+    p0  <- outlook_p_zero(fl, nt, ht)
+    psf <- ifelse(p0 > 0, stats::pnorm((stats::qnorm(p0) - rho * z0) / sg), 0)
+    tibble::tibble(date = d, triplet = obs$triplet, tibble::as_tibble(q),
+                   p_snow_free = round(psf, 3))[!is.na(z0) & !is.na(n0$outlook_length), ]
   }) |>
     purrr::list_rbind() |>
-    dplyr::arrange(factor(flavor, levels = SNOTEL_FLAVORS), triplet, date)
+    dplyr::arrange(triplet, date)
 }

@@ -5,8 +5,8 @@
 # Out of sample: for each test water year Y, the normals (one period, built
 # with calc_station_normals()) and the persistence lengths come only from the
 # record before Y. Outlooks are issued on the 1st and 15th of every month and
-# scored 7-120 days on, for every flavor and every alpha on a grid, plus the
-# normals alone ("climatology") as the baseline.
+# scored 7-120 days on, from the smoothed normals (OUTLOOK_FLAVOR) and every
+# alpha on a grid, plus the normals alone ("climatology") as the baseline.
 #
 # Each row: method (aX.X or climatology), flavor, triplet, wy, issue (MM-DD),
 # lead, obs, crps (from the 5th-95th percentiles in steps of 5) and pit (the
@@ -75,7 +75,7 @@ run_year <- function(Y) {
       dt <- dates[i0 + h]; y <- y_of(dt); ht <- reference_record(sm, dt, years)
       ok <- !is.na(s0) & !is.na(y)
       if (!any(ok)) next
-      for (fl in SNOTEL_FLAVORS) {
+      for (fl in OUTLOOK_FLAVOR) {
         n0 <- rows_for(d0, fl); nt <- rows_for(dt, fl)
         z0 <- pmin(pmax(stats::qnorm(outlook_cdf(fl, n0, h0, s0)), -OUTLOOK_Z_MAX), OUTLOOK_Z_MAX)
         p0 <- outlook_p_zero(fl, nt, ht)

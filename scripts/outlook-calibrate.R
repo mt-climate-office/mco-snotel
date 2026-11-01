@@ -2,7 +2,8 @@
 # Calibrate the outlook's persistence shape alpha from scripts/outlook-hindcast.R
 # output, and write config/outlook_alpha.csv.
 #
-# For each period and flavor, alpha follows a cyclic Fourier series over the
+# For each period (and each flavor in the hindcast; the pipeline uses only
+# zig_smooth), alpha follows a cyclic Fourier series over the
 # water year (two yearly harmonics), fitted to the hindcast's coverage error:
 # at each issue date and alpha, the squared error of the central 50% and 80%
 # ranges (from pit, every case, snow or not) summed over leads. The curve
@@ -83,8 +84,9 @@ print(as.data.frame(bind_rows(report) %>% mutate(across(c(cov80, cov50, skill), 
 x <- bind_rows(table) %>% arrange(match(period, PERIODS), flavor, day)
 con <- file(OUT, "w")
 writeLines(c(
-  "# Outlook persistence shape alpha, by reference period, flavor and day of the",
-  "# 365-day cycle (Oct 1 = 1; Feb 29 is read between days 151 and 152).",
+  "# Outlook persistence shape alpha for the smoothed normals (zig_smooth), by",
+  "# reference period and day of the 365-day cycle (Oct 1 = 1; Feb 29 is read",
+  "# between days 151 and 152).",
   "# rho(h) = exp(-(h / l)^alpha); l is fitted per station in the annual build.",
   "# Calibrated, not calculated: a cyclic Fourier series (2 harmonics) fitted to",
   "# the coverage error of the 50% and 80% outlook ranges in a leave-one-year-out",
