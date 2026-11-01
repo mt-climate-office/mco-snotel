@@ -152,3 +152,27 @@ variable "shadow_trusted_role_arns" {
   type        = list(string)
   default     = ["arn:aws:iam::202533506375:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_SA-MCO-Admins_*"]
 }
+
+# Alerts (alerts.tf, freshness.tf)
+
+variable "alert_email" {
+  description = "Email address subscribed to the <project>-alerts SNS topic. AWS emails it a confirmation link that must be clicked before alerts arrive."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alert_email))
+    error_message = "alert_email must be an email address."
+  }
+}
+
+variable "freshness_schedule" {
+  description = "Cron expression for the freshness check of latest/manifest.json, evaluated in schedule_timezone"
+  type        = string
+  default     = "cron(0 13 * * ? *)" # 1 PM, three hours after the daily run starts
+}
+
+variable "freshness_max_age_days" {
+  description = "Alert when latest/manifest.json's date is more than this many days before today (America/Denver)"
+  type        = number
+  default     = 2
+}

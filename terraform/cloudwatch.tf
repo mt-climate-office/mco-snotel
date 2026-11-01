@@ -10,23 +10,47 @@ resource "aws_cloudwatch_log_group" "pipeline" {
   }
 }
 
-# Alert when a task exits with a non-zero status.
-# ECS Container Insights must be enabled on the cluster (set in ecs.tf).
-resource "aws_cloudwatch_metric_alarm" "task_failures" {
-  alarm_name          = "${var.project_name}-task-failures"
-  alarm_description   = "Fires when the SNOTEL pipeline Fargate task fails"
-  namespace           = "ECS/ContainerInsights"
-  metric_name         = "TaskSetTaskCount"
-  statistic           = "Sum"
-  comparison_operator = "LessThanThreshold"
-  threshold           = 0 # placeholder — wire to an SNS topic to get notified
-  evaluation_periods  = 1
-  period              = 86400
-  treat_missing_data  = "notBreaching"
-
-  dimensions = {
-    ClusterName = aws_ecs_cluster.pipeline.name
+# Per-station plot failures in the daily run. stage_viz catches an error in
+# one station's plot, logs it and goes on, so the task still exits 0:
+#   "  <period>: <n> stations in <m> min; <k> failed"   (k > 0)
+# "0 failed" is the normal line, so this needs a regex. Failures that stop
+# the task ("Plots failed for", "Outlook failed for", AWDB request failures)
+# are left to the ECS rule in alerts.tf. The log group also holds the yearly
+# normals-annual.R run.
+locals {
+  daily_error_metric = {
+    namespace = "MCO/${var.project_name}"
+    name      = "DailyErrors"
   }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "plot_errors" {
+  name           = "${var.project_name}-plot-errors"
+  log_group_name = aws_cloudwatch_log_group.pipeline.name
+  pattern        = "%min; [1-9][0-9]* failed%"
+
+  metric_transformation {
+    namespace     = local.daily_error_metric.namespace
+    name          = local.daily_error_metric.name
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+# Hourly window, so an error on consecutive days alarms (and emails) each day
+# rather than holding one 24-hour alarm open.
+resource "aws_cloudwatch_metric_alarm" "daily_errors" {
+  alarm_name          = "${var.project_name}-daily-errors"
+  alarm_description   = "The ${var.project_name} run logged station plots that failed (it exits 0 for these). Search the log group for: failed."
+  namespace           = local.daily_error_metric.namespace
+  metric_name         = local.daily_error_metric.name
+  statistic           = "Sum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  evaluation_periods  = 1
+  period              = 3600
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
 
   tags = local.common_tags
 }
