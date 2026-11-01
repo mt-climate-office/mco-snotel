@@ -12,18 +12,18 @@
 #        (default: Stuart Mountain MT, Garver Creek MT, Old Independence Mine AK)
 
 suppressPackageStartupMessages(library(magrittr))
-for (f in c("utils", "zig_spline_normals", "normals", "awdb")) source(file.path("R", paste0(f, ".R")))
-for (f in c("ecdf", "zig", "zig_spline", "qnorm_grid")) Rcpp::sourceCpp(file.path("src", paste0(f, ".cpp")))
+for (f in c("normals", "awdb")) source(file.path("R", paste0(f, ".R")))
 
 triplets <- commandArgs(TRUE)
 if (!length(triplets)) triplets <- c("901:MT:SNTL", "918:MT:SNTL", "1315:AK:SNTL")
-wy <- water_year(Sys.Date())
+wy <- normals::year_of(Sys.Date(), "wy")
+wy_start <- normals::year_start(wy, "wy")
 
 x <- awdb_data(triplets, "1900-01-01", Sys.Date(), elements = "WTEQ") %>%
   dplyr::transmute(triplet, date, wteq = dplyr::if_else(wteq < 0, NA_real_, wteq)) %>%
   dplyr::filter(!is.na(wteq))
-sm  <- swe_matrix(dplyr::filter(x, date < water_year_start(Sys.Date())))
-obs <- dplyr::filter(x, date >= water_year_start(Sys.Date()))
+sm  <- swe_record(dplyr::filter(x, date < wy_start))
+obs <- dplyr::filter(x, date >= wy_start)
 
 ok <- function(label, cond) {
   cat(sprintf("  %-70s %s\n", label, if (isTRUE(cond)) "[PASS]" else "[FAIL]"))
@@ -40,7 +40,7 @@ ok("snodas starts at WY2004 until W - 30 passes it",
 ok("por runs from the record's first year",
    identical(period_years(2027L, "por", first_wy = 1980L), 1980:2026))
 ok("reference dates roll Feb 29 back to Feb 28",
-   identical(reference_dates(as.Date("2028-02-29"), 2027L), as.Date("2027-02-28")))
+   identical(normals::reference_dates(as.Date("2028-02-29"), 2027L, "wy"), as.Date("2027-02-28")))
 
 for (period in SNOTEL_PERIODS) {
   cat("\n", period, "\n", sep = "")
@@ -50,17 +50,18 @@ for (period in SNOTEL_PERIODS) {
 
   # 1. ECDF vs type-7 quantiles
   probs <- c(q0100 = 0.1, q0500 = 0.5, q0900 = 0.9)
-  diffs <- purrr::map_dbl(sample(normals_dates(wy), 40), \(d) {
-    h <- reference_record(sm, d, years)
+  diffs <- purrr::map_dbl(sample(normals::year_dates(wy, "wy"), 40), \(d) {
+    h <- normals::reference_record(sm, d, years, "wy")
     e <- n[n$flavor == "ecdf" & n$date == d, ]
-    max(purrr::map_dbl(seq_along(sm$stations), \(i) {
+    max(purrr::map_dbl(seq_along(sm$subjects), \(i) {
       v <- h[i, !is.na(h[i, ])]
       if (length(v) < min(10L, length(years))) return(0)
       p0 <- mean(v == 0); pos <- v[v > 0]
-      # p < p0 is 0; p = p0 is the smallest positive value (src/ecdf_impl.h).
+      # p < p0 is 0; p = p0 is the smallest positive value (the normals
+      # package's empirical family).
       ref <- vapply(probs, \(p) { pa <- (p - p0) / (1 - p0)
         if (pa < 0) 0 else if (length(pos) == 0) NA else unname(stats::quantile(pos, min(pa, 1), type = 7)) }, 0)
-      got <- unname(unlist(e[e$triplet == sm$stations[i], names(probs)]))
+      got <- unname(unlist(e[e$triplet == sm$subjects[i], names(probs)]))
       max(abs(ref - got), na.rm = TRUE)
     }))
   })

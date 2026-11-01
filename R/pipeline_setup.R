@@ -2,10 +2,10 @@
 # viz.R) and standalone scripts.
 #
 # Sets AWS environment defaults, defines pipeline constants, sources R/*.R,
-# compiles the C++ distribution code, and registers fonts. Call once per R
-# session before any stage function.
+# and registers fonts. The distribution code is the normals package (see the
+# Dockerfile). Call once per R session before any stage function.
 
-setup_pipeline <- function(compile = TRUE) {
+setup_pipeline <- function() {
   Sys.setenv(
     AWS_PROFILE        = Sys.getenv("AWS_PROFILE",        unset = "mco"),
     AWS_DEFAULT_REGION = Sys.getenv("AWS_DEFAULT_REGION", unset = "us-west-2")
@@ -32,13 +32,7 @@ setup_pipeline <- function(compile = TRUE) {
   r_files <- r_files[basename(r_files) != "pipeline_setup.R"]
   purrr::walk(r_files, source)
 
-  # The vendored distribution code (src/, from mco-snodas). ecdf_impl.h is
-  # included by ecdf.cpp and zig.cpp.
-  if (compile)
-    for (f in c("ecdf", "zig", "zig_spline", "qnorm_grid"))
-      Rcpp::sourceCpp(file.path("src", paste0(f, ".cpp")), env = globalenv())
-
-  register_snodas_fonts()
+  normals::register_plot_fonts()
 
   invisible(NULL)
 }
