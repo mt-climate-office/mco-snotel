@@ -14,6 +14,9 @@
 #   --newer-than TIME     Fail candidate objects last modified before TIME
 #                         (UTC, e.g. 2026-11-01T19:00:00Z): outputs the run
 #                         should have rewritten but did not (see seed.sh).
+#   --exclude GLOB        Skip keys matching GLOB (repeatable; * and ? match
+#                         across /). Always skipped: README.md at any level,
+#                         which publish-bucket-readmes.sh writes, not a run.
 #   --ignore-json-key K   Also ignore JSON key K (repeatable). Always ignored:
 #                         updated, created, built_at, normals_version, pipeline.
 #   --profile NAME        AWS CLI profile for s3:// trees (default: AWS_PROFILE).
@@ -62,6 +65,7 @@ usage <- function(status = 2) {
 
 parse_args <- function(a) {
   opt <- list(ref = NULL, cand = NULL, keys = NULL, newer_than = NULL, ignore = character(),
+              exclude = c("README.md", "*/README.md"),
               profile = NULL, out = NULL, cores = 1L)
   i <- 1L
   val <- function() { if (i + 1L > length(a)) usage(); a[[i + 1L]] }
@@ -71,6 +75,7 @@ parse_args <- function(a) {
       "--cand"            = { opt$cand       <- val(); i <- i + 1L },
       "--keys"            = { opt$keys       <- val(); i <- i + 1L },
       "--newer-than"      = { opt$newer_than <- val(); i <- i + 1L },
+      "--exclude"         = { opt$exclude    <- c(opt$exclude, val()); i <- i + 1L },
       "--ignore-json-key" = { opt$ignore     <- c(opt$ignore, val()); i <- i + 1L },
       "--profile"         = { opt$profile    <- val(); i <- i + 1L },
       "--out"             = { opt$out        <- val(); i <- i + 1L },
@@ -361,6 +366,9 @@ if (ref$single && cand$single && length(ref$keys) && length(cand$keys)) {
 
 missing <- character()
 ref_keys <- ref$keys; cand_keys <- cand$keys
+excluded <- function(k) Reduce(`|`, lapply(utils::glob2rx(opt$exclude), \(rx) grepl(rx, k)), FALSE)
+ref_keys  <- ref_keys[!excluded(ref_keys)]
+cand_keys <- cand_keys[!excluded(cand_keys)]
 if (!is.null(opt$keys)) {
   wanted <- trimws(readLines(opt$keys))
   wanted <- wanted[nzchar(wanted) & !startsWith(wanted, "#")]
