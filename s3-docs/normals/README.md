@@ -83,12 +83,14 @@ weather forecasts.
 
 - Today's SWE is placed in the smoothed distribution for today: z = Φ⁻¹(percentile),
   clamped to ±4, as `swe_standardized`.
-- h days ahead, z is expected to be ρ·z, with spread √(1 − ρ²), where
-  ρ = exp(−(h / `outlook_length`)^`outlook_alpha`).
+- h days ahead, z is expected to be ρ·z, with spread k·√(1 − ρ²), where
+  ρ = exp(−(h / `outlook_length`)^`outlook_alpha`) and k = exp(−β·ρ·min(z, 0)) widens the
+  range for a station starting below normal (β is calibrated per period).
 - Each quantile is the smoothed quantile on the target date at the matching probability,
   so the outlook keeps the normals' shape and melts out with them.
 - When today's SWE is past z = ±4, the quantiles are scaled so the range starts at
-  today's SWE and relaxes to the normals as ρ fades.
+  today's SWE and relaxes to the normals as ρ fades. A station that is bare today starts in
+  the zero mass, so its range starts at zero.
 
 `outlook_length` (days) is fitted per station from how its reference years' percentiles
 persist. `outlook_alpha` sets how the range widens: near 1 it opens quickly (early winter,
@@ -96,14 +98,18 @@ when one storm can change the season), near 2 it starts narrow and fans out (spr
 melt). It is calibrated by period and day of the year, so the outlook's 80% and 50%
 ranges hold the outcome about 80% and 50% of the time. In a hindcast of 117 stations
 over WY2016–2026, built only from the record before each year, they did so at every lead
-from 7 to 120 days.
+from 7 to 120 days and wherever the station started, from bare and D4 to W4.
+
+Stations without normals on the issue date, or with too little record to fit
+`outlook_length`, have no outlook rows. An outlook issued on Sep 30 has no dates left, so
+there is no file for that day.
 
 | Column | Contents |
 |--------|----------|
 | `triplet` | As in the normals |
 | `date` | The date the row forecasts |
 | `q0000` … `q1000` | SWE quantiles of the outlook, in, to 0.1; `q0000` and `q1000` are read at z = ±4; empty where the date has no normals |
-| `p_snow_free` | Chance of no snow on that date |
+| `p_snow_free` | Chance of no snow on that date; empty where the date has no normals |
 
 The plots' likely range is `q0100`–`q0900`, shown on every flavor's plot. Rows are sorted
 by station and date, about 50 stations per row group. The issue date is in the file name.

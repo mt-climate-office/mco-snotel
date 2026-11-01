@@ -22,7 +22,8 @@ Base URL: **`https://data2.climate.umt.edu/snotel/`** (CloudFront in front of th
    normals folder; `plots`, if present, is that date's plot folder.
 2. Read this water year's observed SWE and percentiles from `latest/observed_{period}.parquet`.
    They are rewritten whole each day, since NRCS edits recent values.
-3. Read the outlook from `date` to Sep 30 from `latest/outlook_{period}.parquet`.
+3. Read the outlook from `date` to Sep 30 from `latest/outlook_{period}.parquet`. Stations
+   with too short a record have no rows; on Sep 30 there is no outlook.
 
 The manifest updates after the daily run (about 10–11 AM Mountain). On Oct 1 the new
 water year has no normals until the yearly build finishes that afternoon.

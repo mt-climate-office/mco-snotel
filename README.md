@@ -100,15 +100,17 @@ read from that date's normals at the matching probabilities:
 
 ```
 rho(h) = exp(-(h / l)^alpha)
-q_p    = Q_target(Phi(rho z + Phi^-1(p) sqrt(1 - rho^2)))
+k      = exp(-beta rho min(z, 0))               at most 3
+q_p    = Q_target(Phi(rho z + Phi^-1(p) k sqrt(1 - rho^2)))
 ```
 
 It uses the vendored `zig_p`/`zig_q`, ECDF fallback included, so the outlook keeps the
 normals' shape and melts out with them. The empirical and fitted flavors were tried and
 dropped: the empirical one cannot reach past the reference years, so a record-setting
-station's range collapsed to a line. A fitted chance of no snow
-below half a reference year is taken as zero; otherwise a record-low station would be read
-as bare. When today's SWE is past z = ±4, the quantiles are scaled by `(swe / Q_today(Phi(z)))^rho`,
+station's range collapsed to a line. For a station with snow on the ground, a fitted chance
+of no snow below half a reference year is taken as zero; otherwise a record-low station
+would be read as bare. A station that is bare today keeps the fitted chance, so its outlook
+starts at zero. When today's SWE is past z = ±4, the quantiles are scaled by `(swe / Q_today(Phi(z)))^rho`,
 so the range starts at today's SWE and relaxes to the normals.
 
 - **`l` (persistence length)** is calculated in the annual build for every station, period
@@ -118,17 +120,31 @@ so the range starts at today's SWE and relaxes to the normals.
 - **`alpha` (persistence shape)** is calibrated, not calculated: one value per period and
   day of the year in `config/outlook_alpha.csv`, a smooth yearly curve (two Fourier
   harmonics) fitted so the outlook's 80% and 50% ranges hold the outcome 80% and 50% of the
-  time. It runs from about 0.7 in early winter (the range opens fast) to about 1.8 in April
-  (it starts narrow and fans out). It is stored in the normals as `outlook_alpha`.
+  time. It is lowest in early winter (about 0.5–0.8: the range opens fast) and highest in
+  April (about 1.8: it starts narrow and fans out). It is stored with `outlook_length` as
+  `outlook_alpha`.
+- **`beta` (spread)** widens the range for stations starting below normal: a station with
+  little snow moves through more percentiles per storm or warm spell. Stations above normal
+  keep the base spread. It fades with `rho`, so long leads keep the normals' spread. One value per period
+  in `config/outlook_spread.csv`, calibrated so coverage is even across starting classes
+  (bare, D4 … W4). Without it, a station starting in D4 landed inside its 80% range only
+  about half the time a week later.
 
-`scripts/outlook-hindcast.R` and `scripts/outlook-calibrate.R` regenerate the table: a
-leave-one-year-out hindcast of 120 stations over the last 11 water years, with the normals
-and lengths for each test year built only from the record before it, scored by coverage and
-CRPS against the normals alone. Rerun them after a change to the method, and every few years.
+`scripts/outlook-hindcast.R` and `scripts/outlook-calibrate.R` regenerate both tables: an
+out-of-sample hindcast of 120 sampled stations (about 117 with enough record) over the last
+11 water years, with the normals and lengths for each test year built only from the record
+before it, scored by coverage and CRPS against the normals alone. The calibration report
+checks the curve leaving each year out. Rerun them after a change to the method, and every
+few years:
 
 ```bash
-Rscript scripts/outlook-hindcast.R archive.parquet stations.parquet hindcast/ snodas   # and 30yr, por
-Rscript scripts/outlook-calibrate.R hindcast/                                          # writes config/outlook_alpha.csv
+# archive.parquet and stations.parquet: local copies of archive/snotel.parquet and stations/stations.parquet
+for p in 30yr snodas por; do Rscript scripts/outlook-hindcast.R archive.parquet stations.parquet cal1/ $p 120 8 beta; done
+Rscript scripts/outlook-calibrate.R cal1/ beta      # writes config/outlook_spread.csv
+for p in 30yr snodas por; do Rscript scripts/outlook-hindcast.R archive.parquet stations.parquet cal2/ $p 120 8 alpha; done
+Rscript scripts/outlook-calibrate.R cal2/ alpha     # writes config/outlook_alpha.csv
+for p in 30yr snodas por; do Rscript scripts/outlook-hindcast.R archive.parquet stations.parquet cal3/ $p 120 8 beta; done
+Rscript scripts/outlook-calibrate.R cal3/ beta      # check coverage by starting class (rewrites the spread table)
 ```
 
 ## Figures

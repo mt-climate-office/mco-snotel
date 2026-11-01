@@ -1,6 +1,13 @@
 #!/usr/bin/env Rscript
-# Calibrate the outlook's persistence shape alpha from scripts/outlook-hindcast.R
-# output, and write config/outlook_alpha.csv.
+# Calibrate the outlook from scripts/outlook-hindcast.R output.
+#
+#   alpha  (hindcast mode alpha) the persistence shape: writes
+#          config/outlook_alpha.csv.
+#   beta   (hindcast mode beta) the spread's dependence on the starting z:
+#          writes config/outlook_spread.csv. beta is the grid value whose 80%
+#          and 50% ranges come closest to their targets across starting classes
+#          (bare, D4, D3-D2, D1-D0, normal, W0-W1, W2-W3, W4), each class
+#          weighted equally, summed over leads.
 #
 # For each period (and each flavor in the hindcast; the pipeline uses only
 # zig_smooth), alpha follows a cyclic Fourier series over the
@@ -14,15 +21,20 @@
 # Prints, leaving each test year out, the coverage and CRPS skill of the curve
 # against picking alpha month by month.
 #
+# The two interact a little: calibrate beta, then alpha with that beta, and
+# check the classes again with a final beta-mode hindcast.
+#
 # Usage (from the repo root):
-#   Rscript scripts/outlook-calibrate.R HINDCAST_DIR [OUT_CSV]
-#     HINDCAST_DIR  holds hindcast_30yr.parquet, hindcast_snodas.parquet, hindcast_por.parquet
-#     OUT_CSV       default config/outlook_alpha.csv
+#   Rscript scripts/outlook-calibrate.R HINDCAST_DIR [alpha|beta]
+#     HINDCAST_DIR  holds hindcast_{period}.parquet (alpha) or
+#                   hindcast_beta_{period}.parquet (beta) for 30yr, snodas, por
 
 suppressPackageStartupMessages(library(dplyr))
 args <- commandArgs(TRUE)
-D   <- args[1]
-OUT <- if (length(args) >= 2) args[2] else "config/outlook_alpha.csv"
+D    <- args[1]
+WHAT <- if (length(args) >= 2) args[2] else "alpha"
+stopifnot(WHAT %in% c("alpha", "beta"))
+OUT  <- if (WHAT == "alpha") "config/outlook_alpha.csv" else "config/outlook_spread.csv"
 K   <- 2L   # yearly harmonics
 PERIODS <- c("30yr", "snodas", "por")
 
@@ -46,6 +58,47 @@ fit_curve <- function(es) {
   starts <- list(c(1.2, rep(0, 2 * K)), c(1.3, -0.5, 0, rep(0, 2 * K - 2)))
   fits <- lapply(starts, \(s) stats::optim(s, obj, method = "Nelder-Mead", control = list(maxit = 4000, reltol = 1e-10)))
   fits[[which.min(vapply(fits, `[[`, 0, "value"))]]$par
+}
+
+# Starting class of each case, from the issue date's SWE and z.
+CLASSES <- c("Bare", "D4", "D3-D2", "D1-D0", "Normal", "W0-W1", "W2-W3", "W4")
+start_class <- function(s0, z0) {
+  pt <- 100 * stats::pnorm(z0)
+  factor(dplyr::case_when(s0 == 0 ~ "Bare", pt < 2 ~ "D4", pt < 10 ~ "D3-D2", pt < 30 ~ "D1-D0", pt <= 70 ~ "Normal",
+                          pt <= 90 ~ "W0-W1", pt <= 98 ~ "W2-W3", TRUE ~ "W4"), levels = CLASSES)
+}
+
+if (WHAT == "beta") {
+  out <- list(); cls <- list()
+  for (period in PERIODS) {
+    s <- arrow::read_parquet(file.path(D, paste0("hindcast_beta_", period, ".parquet")),
+                             col_select = c("method", "wy", "lead", "s0", "z0", "pit")) %>%
+      filter(method != "climatology") %>%
+      mutate(beta = as.numeric(sub("^b", "", method)), start = start_class(s0, z0),
+             in80 = abs(pit - 0.5) <= 0.4, in50 = abs(pit - 0.5) <= 0.25)
+    cov <- s %>% group_by(beta, start, lead) %>% summarise(c80 = mean(in80), c50 = mean(in50), .groups = "drop")
+    err <- cov %>% group_by(beta) %>% summarise(e = sum((c80 - 0.8)^2 + (c50 - 0.5)^2), .groups = "drop")
+    best <- err$beta[which.min(err$e)]
+    out[[period]] <- tibble(period = period, beta = best)
+    cls[[period]] <- s %>% filter(beta %in% c(0, best)) %>% group_by(period = period, beta, start) %>%
+      summarise(n = n(), cov80 = mean(in80), cov50 = mean(in50), .groups = "drop")
+  }
+  cat("80% and 50% range coverage by starting class, beta = 0 and the chosen beta\n")
+  print(as.data.frame(bind_rows(cls) %>% mutate(across(c(cov80, cov50), \(v) round(v, 2))) %>%
+    tidyr::pivot_wider(names_from = beta, values_from = c(cov80, cov50), names_prefix = "b")))
+  x <- bind_rows(out)
+  con <- file(OUT, "w")
+  writeLines(c(
+    "# Outlook spread dependence on the starting z, by reference period:",
+    "# the spread is multiplied by k = exp(-beta * rho * min(z0, 0)), at most 3, so",
+    "# stations starting below normal get a wider range while persistence holds.",
+    paste0("# Calibrated from the hindcast (scripts/outlook-hindcast.R, scripts/outlook-calibrate.R; ",
+           format(Sys.Date()), ").")), con)
+  utils::write.csv(x, con, row.names = FALSE, quote = FALSE)
+  close(con)
+  print(as.data.frame(x))
+  message("Wrote ", OUT)
+  quit(save = "no")
 }
 
 table <- list(); report <- list()
@@ -88,9 +141,10 @@ writeLines(c(
   "# reference period and day of the 365-day cycle (Oct 1 = 1; Feb 29 is read",
   "# between days 151 and 152).",
   "# rho(h) = exp(-(h / l)^alpha); l is fitted per station in the annual build.",
-  "# Calibrated, not calculated: a cyclic Fourier series (2 harmonics) fitted to",
-  "# the coverage error of the 50% and 80% outlook ranges in a leave-one-year-out",
-  "# hindcast. Regenerate with scripts/outlook-hindcast.R and",
+  "# Calibrated, not calculated: a cyclic Fourier series (2 harmonics) fitted, on",
+  "# every test year, to the coverage error of the 50% and 80% outlook ranges in an",
+  "# out-of-sample hindcast (checked leaving each year out). Regenerate with",
+  "# scripts/outlook-hindcast.R and",
   paste0("# scripts/outlook-calibrate.R (", format(Sys.Date()), ").")), con)
 utils::write.csv(x, con, row.names = FALSE, quote = FALSE)
 close(con)

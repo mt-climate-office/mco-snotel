@@ -147,8 +147,10 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
                               units = "inches",
                               source = "NRCS AWDB REST API, daily WTEQ",
                               methods = "mco-snodas@62fe19a (src/, R/zig_spline_normals.R)",
-                              outlook = list(alpha_table = OUTLOOK_ALPHA_FILE,
+                              outlook = list(flavor = OUTLOOK_FLAVOR,
+                                             alpha_table = OUTLOOK_ALPHA_FILE,
                                              alpha_table_md5 = unname(tools::md5sum(OUTLOOK_ALPHA_FILE)),
+                                             spread_beta = outlook_spread_beta(period),
                                              persistence = "rho(h) = exp(-(h / outlook_length)^outlook_alpha)"),
                               built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
                          file.path(out, "provenance.json"), auto_unbox = TRUE, pretty = TRUE)
@@ -235,7 +237,8 @@ stage_outlook <- function(date, periods = SNOTEL_PERIODS, upload = TRUE) {
     np <- s3_local(file.path(normals_prefix(period, wy), "normals.parquet"), refresh = FALSE)
     if (is.null(np)) { message("  ", period, ": no normals"); next }
     t0 <- Sys.time()
-    ol <- calc_station_outlook(sm, arrow::read_parquet(np), normals_years(sm, wy, period), obs, date)
+    ol <- calc_station_outlook(sm, arrow::read_parquet(np), normals_years(sm, wy, period), obs, date,
+                               beta = outlook_spread_beta(period))
     if (is.null(ol)) { message("  ", period, ": no outlook (normals without outlook columns, or no SWE)"); next }
     local <- write_outlook_pq(ol, file.path(OUTPUT_DIR, outlook_key(period, date)))
     if (upload) s3_put_file(local, S3_BUCKET, outlook_key(period, date), content_type = PARQUET_TYPE)
@@ -278,7 +281,9 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
     prov <- s3_local(file.path(normals_prefix(period, wy), "provenance.json"), refresh = FALSE)
     if (!is.null(prov)) ref_years_out[[period]] <- jsonlite::read_json(prov, simplifyVector = TRUE)$reference_water_years
 
-    outlook <- outlook_for_plots(period, date, observed)
+    # The plots do not depend on the outlook: if it fails, they are drawn without it.
+    outlook <- tryCatch(outlook_for_plots(period, date, observed),
+                        error = \(e) { message("  ", period, ": no outlook on the plots (", conditionMessage(e), ")"); NULL })
 
     todo <- if (is.null(stations)) unique(observed$triplet) else stations
     todo <- sort(intersect(todo, unique(normals$triplet)))
@@ -373,7 +378,8 @@ outlook_for_plots <- function(period, date, observed) {
   d   <- date
   obs <- observed[observed$date == d & observed$flavor == SNOTEL_FLAVORS[1], ]
   ol  <- calc_station_outlook(sm, arrow::read_parquet(np), normals_years(sm, wy, period),
-                              tibble::tibble(triplet = obs$triplet, wteq = obs$swe), date)
+                              tibble::tibble(triplet = obs$triplet, wteq = obs$swe), date,
+                              beta = outlook_spread_beta(period))
   if (!is.null(ol)) ol[, cols]
 }
 

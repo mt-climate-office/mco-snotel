@@ -8,7 +8,8 @@
 #
 #   z0     = qnorm(F_today(swe))                         clamped to [-4, 4]
 #   rho(h) = exp(-(h / l)^alpha)                         h days ahead
-#   q_p    = Q_target(pnorm(rho z0 + qnorm(p) sqrt(1 - rho^2)))
+#   k      = exp(-beta rho min(z0, 0))                   at most 3
+#   q_p    = Q_target(pnorm(rho z0 + qnorm(p) k sqrt(1 - rho^2)))
 #
 # where F and Q are the smoothed distribution function and quantile function
 # (the vendored zig_p / zig_q, ECDF fallback included), so the outlook keeps
@@ -23,19 +24,27 @@
 #          narrow and fans out later. Calibrated by period and day of the year
 #          from a hindcast (config/outlook_alpha.csv), and stored with
 #          outlook_length as outlook_alpha.
+#   k      widens the spread for stations starting below normal (a station with
+#          little snow moves through more percentiles per storm or warm spell);
+#          stations above normal keep it. It fades to 1 as rho does, so long
+#          leads keep the normals' spread. beta is calibrated per period from
+#          the same hindcast (config/outlook_spread.csv).
 #
-# A fitted chance of no snow below half a reference year (0.5 / n_valid) is
-# taken as zero: the smoothed fit never reaches exactly zero, and a record-low
-# station would otherwise be placed on that sliver and read as bare.
+# For a station with snow on the ground, a fitted chance of no snow below half
+# a reference year (0.5 / n_valid) is taken as zero: the smoothed fit never
+# reaches exactly zero, and a record-low station would otherwise be placed on
+# that sliver and read as bare. A station that is bare today keeps the fitted
+# chance, so it is placed in the zero mass and its outlook starts at zero.
 #
-# Today's SWE can lie beyond what the distribution represents: above the
-# reference years' maximum (ecdf) or past z = +-4. The quantiles are then scaled
-# by (swe / Q_today(pnorm(z0)))^rho, so the range starts at today's SWE and
+# Today's SWE can lie past z = +-4. The quantiles are then scaled by
+# (swe / Q_today(pnorm(z0)))^rho, so the range starts at today's SWE and
 # relaxes to the normals as rho fades (outlook_anchor()). Within the
 # distribution the ratio is about 1.
 
 OUTLOOK_FLAVOR     <- "zig_smooth"
 OUTLOOK_ALPHA_FILE <- "config/outlook_alpha.csv"
+OUTLOOK_SPREAD_FILE <- "config/outlook_spread.csv"
+OUTLOOK_K_MAX      <- 3
 OUTLOOK_FIT_LAGS   <- c(3, 7, 14, 21, 30, 45, 60, 90, 120)   # days, for fitting l
 OUTLOOK_POOL_DAYS  <- 15L    # issue dates pooled either side when fitting l
 OUTLOOK_MIN_PAIRS  <- 8L     # reference years needed for a lag correlation
@@ -60,36 +69,58 @@ outlook_alpha <- function(period, dates, flavor = OUTLOOK_FLAVOR, table = outloo
   stats::approx(x$day, x$alpha, xout = normals_cycle_day(dates), rule = 2)$y
 }
 
-# ZIG parameters for one flavor's normals rows on one date, with a chance of no
-# snow below half a reference year taken as zero.
-outlook_params <- function(nf) {
+#' beta, the spread's dependence on the starting z, for a period (0 if the
+#' table is missing or has no row for it).
+outlook_spread_beta <- local({
+  tab <- NULL
+  function(period, path = OUTLOOK_SPREAD_FILE) {
+    if (is.null(tab)) tab <<- if (file.exists(path)) utils::read.csv(path, comment.char = "#", stringsAsFactors = FALSE)
+                              else data.frame(period = character(), beta = numeric())
+    b <- tab$beta[tab$period == period]
+    if (length(b)) b[1] else 0
+  }
+})
+
+# Spread factor k for starting z0 and persistence rho (vectors): wider below
+# normal, 1 at or above it.
+outlook_spread_k <- function(z0, rho, beta) {
+  pmin(exp(-beta * rho * pmin(z0, 0)), OUTLOOK_K_MAX)
+}
+
+# ZIG parameters for one flavor's normals rows on one date. Where `floor` is
+# TRUE (stations with snow on the ground), a chance of no snow below half a
+# reference year is taken as zero.
+outlook_params <- function(nf, floor = TRUE) {
   p0 <- nf$zig_p_zero
-  p0[!is.na(p0) & p0 < 0.5 / pmax(1L, nf$n_valid)] <- 0
+  p0[rep_len(floor, length(p0)) & !is.na(p0) & p0 < 0.5 / pmax(1L, nf$n_valid)] <- 0
   cbind(nf$zig_shape, nf$zig_scale, p0)
 }
 
 # Percentiles (0-1) of x under one flavor, one date: nf the normals rows and h
 # the reference record (n_station x n_years), in the same station order.
-outlook_cdf <- function(flavor, nf, h, x) {
-  if (flavor == "ecdf") ecdf_p(h, x) else zig_p(outlook_params(nf), x, h)
+outlook_cdf <- function(flavor, nf, h, x, floor = TRUE) {
+  if (flavor == "ecdf") ecdf_p(h, x) else zig_p(outlook_params(nf, floor), x, h)
 }
 
-# Chance of exactly no snow under one flavor, one date.
-outlook_p_zero <- function(flavor, nf, h) {
-  emp <- rowSums(h == 0, na.rm = TRUE) / pmax(1L, rowSums(!is.na(h)))
-  if (flavor == "ecdf") return(emp)
-  p0 <- outlook_params(nf)[, 3]
-  ifelse(is.na(nf$zig_shape) | is.na(nf$zig_scale), emp, p0)
+# Chance of exactly no snow under one flavor, one date: the fitted p_zero (as
+# zig_q uses it, ECDF fallback rows included); NA where there are no normals.
+outlook_p_zero <- function(flavor, nf, h, floor = TRUE) {
+  if (flavor == "ecdf") {
+    n <- rowSums(!is.na(h))
+    return(ifelse(n >= 10L, rowSums(h == 0, na.rm = TRUE) / pmax(1L, n), NA_real_))
+  }
+  outlook_params(nf, floor)[, 3]
 }
 
 # Quantiles under one flavor, one date, at station-specific probabilities u
 # (n_station x n_probs). Parametric rows are vectorised; ECDF rows (and the
 # ZIG's ECDF fallback) go through the vendored code one station at a time.
-outlook_quantiles <- function(flavor, nf, h, u) {
+outlook_quantiles <- function(flavor, nf, h, u, floor = TRUE) {
   out <- matrix(NA_real_, nrow(u), ncol(u))
+  floor <- rep_len(floor, nrow(u))
   par <- if (flavor == "ecdf") rep(FALSE, nrow(u)) else !is.na(nf$zig_shape) & !is.na(nf$zig_scale)
   if (any(par)) {
-    p <- outlook_params(nf)[par, , drop = FALSE]
+    p <- outlook_params(nf, floor)[par, , drop = FALSE]
     adj <- (u[par, , drop = FALSE] - p[, 3]) / (1 - p[, 3])
     q <- stats::qgamma(pmin(pmax(adj, 0), 1), shape = p[, 1], scale = p[, 2])
     out[par, ] <- ifelse(adj <= 0, 0, q)
@@ -97,7 +128,7 @@ outlook_quantiles <- function(flavor, nf, h, u) {
   for (i in which(!par)) {
     if (all(is.na(h[i, ]))) next
     out[i, ] <- if (flavor == "ecdf") ecdf_q(h[i, , drop = FALSE], u[i, ])[1, ]
-                else zig_q(outlook_params(nf[i, ]), u[i, ], h[i, , drop = FALSE])[1, ]
+                else zig_q(outlook_params(nf[i, ], floor[i]), u[i, ], h[i, , drop = FALSE])[1, ]
   }
   out
 }
@@ -106,9 +137,10 @@ outlook_quantiles <- function(flavor, nf, h, u) {
 # percentile: about 1 within the distribution, above 1 when today's SWE is
 # above what it holds, below 1 when below. Kept on the side of today's anomaly
 # (a quantile that underflows at z = -4 must not scale a low station up) and
-# within [0.1, 10]; 1 where either is zero or missing.
-outlook_anchor <- function(flavor, nf, h, z0, swe) {
-  q0 <- outlook_quantiles(flavor, nf, h, matrix(stats::pnorm(z0), ncol = 1))[, 1]
+# within [0.1, 10]; 1 where either is zero or missing (a bare station starts in
+# the zero mass and needs no anchor).
+outlook_anchor <- function(flavor, nf, h, z0, swe, floor = TRUE) {
+  q0 <- outlook_quantiles(flavor, nf, h, matrix(stats::pnorm(z0), ncol = 1), floor)[, 1]
   r  <- swe / q0
   r  <- ifelse(is.finite(r) & r > 0 & !is.na(z0), r, 1)
   r  <- ifelse(z0 > 0, pmax(r, 1), pmin(r, 1))
@@ -147,7 +179,9 @@ outlook_correlations <- function(sm, normals, years, flavors = OUTLOOK_FLAVOR) {
     Z <- lapply(seq_len(L), \(t) {
       nf <- by_date[[format(dates[t])]]; nf <- nf[nf$flavor == fl, ]; nf <- nf[match(sm$stations, nf$triplet), ]
       h  <- hs[[t]]
-      z  <- vapply(seq_len(ncol(h)), \(y) stats::qnorm(outlook_cdf(fl, nf, h, h[, y])), numeric(nrow(h)))
+      # A bare reference year is placed in the zero mass, as a bare station is.
+      z  <- vapply(seq_len(ncol(h)), \(y) stats::qnorm(outlook_cdf(fl, nf, h, h[, y], floor = !(h[, y] %in% 0))),
+                   numeric(nrow(h)))
       z  <- matrix(z, nrow(h)); z[is.na(h)] <- NA
       pmin(pmax(z, -OUTLOOK_Z_MAX), OUTLOOK_Z_MAX)
     })
@@ -214,11 +248,12 @@ outlook_lengths <- function(sm, normals, years, period) {
 #' @param obs     triplet and wteq on the issue date (stations without a value
 #'   are left out).
 #' @param issue   The issue date.
+#' @param beta    The spread's dependence on the starting z (outlook_spread_beta()).
 #' @return date, triplet, q0000 ... q1000 (the normals' 19 quantile
 #'   probabilities; 0 and 1 are read at z = -4 and 4) and p_snow_free (the
 #'   chance of no snow on that date), for every date after the issue date
 #'   through Sep 30. NULL if the normals have no outlook columns.
-calc_station_outlook <- function(sm, normals, years, obs, issue) {
+calc_station_outlook <- function(sm, normals, years, obs, issue, beta = 0) {
   if (!all(c("outlook_length", "outlook_alpha") %in% names(normals))) return(NULL)
   issue <- lubridate::as_date(issue)
   obs   <- obs[!is.na(obs$wteq) & obs$triplet %in% sm$stations, ]
@@ -231,19 +266,20 @@ calc_station_outlook <- function(sm, normals, years, obs, issue) {
   fl <- OUTLOOK_FLAVOR
   rows_for <- \(d) { nf <- by_date[[format(d)]]; nf <- nf[nf$flavor == fl, ]; nf[match(obs$triplet, nf$triplet), ] }
 
+  snow <- obs$wteq > 0   # where the zero-chance floor applies
   n0 <- rows_for(issue)
   h0 <- reference_record(sm, issue, years)[i, , drop = FALSE]
-  z0 <- pmin(pmax(stats::qnorm(outlook_cdf(fl, n0, h0, obs$wteq)), -OUTLOOK_Z_MAX), OUTLOOK_Z_MAX)
-  anchor <- outlook_anchor(fl, n0, h0, z0, obs$wteq)
+  z0 <- pmin(pmax(stats::qnorm(outlook_cdf(fl, n0, h0, obs$wteq, snow)), -OUTLOOK_Z_MAX), OUTLOOK_Z_MAX)
+  anchor <- outlook_anchor(fl, n0, h0, z0, obs$wteq, snow)
   purrr::map(targets, \(d) {
     nt  <- rows_for(d)
     ht  <- reference_record(sm, d, years)[i, , drop = FALSE]
     rho <- exp(-(as.numeric(d - issue) / n0$outlook_length)^n0$outlook_alpha)
-    sg  <- sqrt(pmax(1e-12, 1 - rho^2))
+    sg  <- sqrt(pmax(1e-12, 1 - rho^2)) * outlook_spread_k(z0, rho, beta)
     u   <- stats::pnorm(rho * z0 + outer(sg, zq))
-    q   <- round(outlook_quantiles(fl, nt, ht, u) * anchor^rho, 1)
+    q   <- round(outlook_quantiles(fl, nt, ht, u, snow) * anchor^rho, 1)
     colnames(q) <- names(SNODAS_QUANTILES)
-    p0  <- outlook_p_zero(fl, nt, ht)
+    p0  <- outlook_p_zero(fl, nt, ht, snow)
     psf <- ifelse(p0 > 0, stats::pnorm((stats::qnorm(p0) - rho * z0) / sg), 0)
     tibble::tibble(date = d, triplet = obs$triplet, tibble::as_tibble(q),
                    p_snow_free = round(psf, 3))[!is.na(z0) & !is.na(n0$outlook_length), ]
