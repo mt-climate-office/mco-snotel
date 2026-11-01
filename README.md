@@ -19,14 +19,15 @@ Daily (mco-snotel.R, ECS Fargate, 10:00 AM Mountain)
   2  refetch the water year to date from AWDB and replace those
      rows of the archive (NRCS edits recent values)                 archive/snotel.parquet
   3  SWE percentiles against the frozen normals, every period       normals/{period}/observed/
-  4  per-station seasonal SWE plots (snodas period)                 plots/{date}/
-  5  copy the current tables to latest/, write manifest             latest/
+  4  outlook from the newest date to Sep 30, every period           normals/{period}/outlook/
+  5  per-station seasonal SWE plots (snodas period)                 plots/{date}/
+  6  copy the current tables to latest/, write manifest             latest/
 
 Yearly, Oct 1 at 2 PM (normals-annual.R, the same task)
   refetch every station's whole record from AWDB
   freeze the record before the new water year                       normals/reference/wy{YYYY}.parquet
   build ECDF, ZIG and ZIG-smooth normals for every station, day
-  and period of the new water year                                  normals/{period}/wy{YYYY}/
+  and period of the new water year, with the outlook's persistence  normals/{period}/wy{YYYY}/
 ```
 
 Data come from the NRCS [AWDB REST API](https://wcc.sc.egov.usda.gov/awdbRestApi/swagger-ui/index.html)
@@ -88,11 +89,53 @@ readings are treated as missing.
 `SNODAS_QUANTILES` in `R/utils.R`). `q0000` is 0; `q1000` is NA wherever SWE can be
 positive.
 
+## Outlook
+
+Each day, `stage_outlook()` writes the likely SWE for the rest of the water year at every
+station, for every period and flavor (`R/outlook.R`). It is statistical and reads the
+normals directly: today's SWE is placed in the flavor's distribution for today
+(z = Φ⁻¹(percentile), clamped to ±4), z is carried forward and fades toward normal, and each
+target date's quantiles are read from that date's normals at the matching probabilities:
+
+```
+rho(h) = exp(-(h / l)^alpha)
+q_p    = Q_target(Phi(rho z + Phi^-1(p) sqrt(1 - rho^2)))
+```
+
+It uses the vendored `ecdf_p`/`ecdf_q` and `zig_p`/`zig_q`, ECDF fallback included, so the
+outlook keeps each flavor's shape and melts out with the normals. A fitted chance of no snow
+below half a reference year is taken as zero; otherwise a record-low station would be read
+as bare. When today's SWE is beyond what the distribution holds (above the reference years'
+maximum for `ecdf`, or past z = ±4), the quantiles are scaled by
+`(swe / Q_today(Phi(z)))^rho`, so the range starts at today's SWE and relaxes to the normals.
+
+- **`l` (persistence length)** is calculated in the annual build for every station, flavor,
+  period and issue date, from the reference years: each year's z, and how z correlates
+  across years from a date to 3–120 days later (issue dates within ±15 days pooled), fitted
+  by `rho(h)`. It is stored in the normals as `outlook_length`.
+- **`alpha` (persistence shape)** is calibrated, not calculated: one value per period,
+  flavor and day of the year in `data/outlook_alpha.csv`, a smooth yearly curve (two Fourier
+  harmonics) fitted so the outlook's 80% and 50% ranges hold the outcome 80% and 50% of the
+  time. It runs from about 0.7 in early winter (the range opens fast) to about 1.8 in April
+  (it starts narrow and fans out). It is stored in the normals as `outlook_alpha`.
+
+`scripts/outlook-hindcast.R` and `scripts/outlook-calibrate.R` regenerate the table: a
+leave-one-year-out hindcast of 120 stations over the last 11 water years, with the normals
+and lengths for each test year built only from the record before it, scored by coverage and
+CRPS against the normals alone. Rerun them after a change to the method, and every few years.
+
+```bash
+Rscript scripts/outlook-hindcast.R archive.parquet stations.parquet hindcast/ snodas   # and 30yr, por
+Rscript scripts/outlook-calibrate.R hindcast/                                          # writes data/outlook_alpha.csv
+```
+
 ## Figures
 
 `stage_viz()` draws one seasonal SWE plot per station and flavor: the water year's normal
-classes in the USDM drought (D4–D0) and pluvial (W0–W4) percentiles, the median dashed, and
-this year's SWE. It is `plot_snodas()` from mco-snodas with SWE in inches
+classes in the USDM drought (D4–D0) and pluvial (W0–W4) percentiles, the median dashed,
+this year's SWE, and the outlook's likely range (10th–90th percentile, gray with dotted
+edges, keyed with the current conditions). For a date without a stored outlook (a
+backfill), the range is computed from the observed table. It is `plot_snodas()` from mco-snodas with SWE in inches
 (`R/plot_snotel.R`). The frame, legend, logos and fixed 256-colour palette are mco-snodas's
 (`R/plot.R`, `plot_palette.png`), so the two products' plots match. A station's three
 flavors share their SWE axis. Files are 1500 × 1000 px, 8-bit PNGs.
@@ -145,13 +188,16 @@ R/
   awdb.R               AWDB REST API: stations and daily data, batched
   archive.R            the archive: full and water-year refetches, state, SWE
   normals.R            periods, reference records, station normals and percentiles
+  outlook.R            the outlook: persistence lengths and daily quantiles
   stages.R             stage functions
   plot_snotel.R        the station plot
   plot.R, utils.R, s3.R, s3_sync.R, zig_spline_normals.R   vendored from mco-snodas
 src/                   Rcpp, vendored from mco-snodas
+data/                  outlook_alpha.csv, the outlook's calibrated persistence shape
 scripts/               test_distributions.R, test_stations.R, check-vendored.sh,
                        check-plot-palette.R, backfill-figures.sh,
-                       publish-bucket-readmes.sh, run_local.sh, ecr-push.sh
+                       publish-bucket-readmes.sh, run_local.sh, ecr-push.sh,
+                       outlook-hindcast.R, outlook-calibrate.R
 s3-docs/               README.md for each bucket directory
 terraform/             AWS infrastructure
 .github/workflows/     image build (docker-publish.yml)

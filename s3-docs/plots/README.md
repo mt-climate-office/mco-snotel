@@ -2,8 +2,10 @@
 
 One seasonal SWE plot per station, normals period and flavor, for each date: the water
 year's normals (Oct 1–Sep 30; "WY" in the legend) in USDM-style percentile classes
-(D4–D0 drought, W0–W4 pluvial), the median dashed, and this year's SWE, in inches. They
-use the design of the SNODAS watershed plots at `data2.climate.umt.edu/snodas/plots/`.
+(D4–D0 drought, W0–W4 pluvial), the median dashed, this year's SWE, and the likely range
+for the rest of the year (gray, dotted edges: the outlook's 10th–90th percentile; see
+`../normals/`), in inches. They use the design of the SNODAS watershed plots at
+`data2.climate.umt.edu/snodas/plots/`.
 
 ## Layout
 
@@ -23,4 +25,3 @@ short a record show their SWE without normals.
 failed. It is written last: if it exists and lists a period, that period's plots for the
 date are complete.
 
-Plots older than a year are kept in a cheaper storage class; they are still public.

@@ -22,6 +22,7 @@ Base URL: **`https://data2.climate.umt.edu/snotel/`** (CloudFront in front of th
    normals folder; `plots`, if present, is that date's plot folder.
 2. Read this water year's observed SWE and percentiles from `latest/observed_{period}.parquet`.
    They are rewritten whole each day, since NRCS edits recent values.
+3. Read the outlook from `date` to Sep 30 from `latest/outlook_{period}.parquet`.
 
 The manifest updates after the daily run (about 10–11 AM Mountain). On Oct 1 the new
 water year has no normals until the yearly build finishes that afternoon.
@@ -39,6 +40,7 @@ water year has no normals until the yearly build finishes that afternoon.
 | Normals, every station, flavor and date of a water year | `normals/{period}/wy{YYYY}/normals.parquet` |
 | One station's normals for a water year | `normals/{period}/wy{YYYY}/by_station/{station}.parquet` |
 | Observed SWE and percentiles, every station, water year to date | `normals/{period}/observed/wy{YYYY}.parquet` |
+| Outlook issued on a date, to Sep 30, every station | `normals/{period}/outlook/wy{YYYY}/{d}.parquet` |
 | Which reference years were used | `normals/{period}/wy{YYYY}/provenance.json` |
 | The record the normals were built from | `normals/reference/wy{YYYY}.parquet` |
 | Plots | `plots/{d}/{period}/{flavor}/swe/usdm/{station}.png` |
@@ -70,6 +72,16 @@ reader such as hyparquet or DuckDB-Wasm. The observed table is sorted by flavor,
 triplet, and each row group holds about a month of one flavor, so a reader that skips row
 groups by their `date` statistics (hyparquet's `rowStart`/`rowEnd`, DuckDB) can fetch one
 date for every station without the whole year.
+
+## Outlook
+
+The outlook is the likely SWE for the rest of the water year, from the newest date. Show
+its likely range as `q0100`–`q0900` (the plots shade it gray), and use the same period and
+flavor as the normals beside it. It is statistical, not a weather forecast: it carries the
+station's current percentile forward, fading toward normal, and is reissued every day.
+`p_snow_free` is the chance a date is bare, which gives a melt-out outlook. Rows are sorted
+by station, so a reader that skips row groups by their `triplet` statistics can fetch one
+station's outlook (up to about 1,100 rows) without the whole file.
 
 ## Plots
 

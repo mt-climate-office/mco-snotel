@@ -20,6 +20,8 @@ SNOTEL_PLOT_PERIODS <- "snodas"
 normals_prefix <- function(period, wy) file.path(S3_PREFIX_NORMALS, period, paste0("wy", wy))
 reference_key  <- function(wy) file.path(S3_PREFIX_NORMALS, "reference", paste0("wy", wy, ".parquet"))
 observed_key   <- function(period, wy) file.path(S3_PREFIX_NORMALS, period, "observed", paste0("wy", wy, ".parquet"))
+outlook_key    <- function(period, date) file.path(S3_PREFIX_NORMALS, period, "outlook", paste0("wy", water_year(date)),
+                                                   paste0(format(lubridate::as_date(date)), ".parquet"))
 
 write_pq <- function(x, path, chunk_size = NULL) {
   fs::dir_create(dirname(path))
@@ -90,7 +92,8 @@ stage_ingest <- function(stations, date = Sys.Date(), upload = TRUE) {
 #'
 #' Freezes the record before wy as normals/reference/wy{wy}.parquet, then
 #' writes, for each period, normals/{period}/wy{wy}/:
-#'   normals.parquet                 every flavor, date and station
+#'   normals.parquet                 every flavor, date and station, with the
+#'                                   outlook's persistence (outlook_length, outlook_alpha)
 #'   by_station/{station}.parquet    the same, one file per station
 #'   zig_smooth_coef.parquet         spline coefficients per station
 #'   zig_smooth_diagnostics.parquet  fit status, lambda and EDF per station
@@ -109,6 +112,9 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
   for (period in periods) {
     t0  <- Sys.time()
     res <- calc_station_normals(sm, wy, period, cores = cores)
+    # The outlook's persistence, from the same reference years (R/outlook.R).
+    res$normals <- dplyr::left_join(res$normals, outlook_lengths(sm, res$normals, res$years, period),
+                                    by = c("flavor", "date", "triplet"))
     out <- file.path(OUTPUT_DIR, normals_prefix(period, wy))
     unlink(out, recursive = TRUE)
 
@@ -141,6 +147,9 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
                               units = "inches",
                               source = "NRCS AWDB REST API, daily WTEQ",
                               methods = "mco-snodas@62fe19a (src/, R/zig_spline_normals.R)",
+                              outlook = list(alpha_table = OUTLOOK_ALPHA_FILE,
+                                             alpha_table_md5 = unname(tools::md5sum(OUTLOOK_ALPHA_FILE)),
+                                             persistence = "rho(h) = exp(-(h / outlook_length)^outlook_alpha)"),
                               built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
                          file.path(out, "provenance.json"), auto_unbox = TRUE, pretty = TRUE)
 
@@ -189,6 +198,54 @@ stage_percentiles <- function(wy, periods = SNOTEL_PERIODS, upload = TRUE) {
 }
 
 
+# ── Outlook ───────────────────────────────────────────────────────────────────
+
+# An outlook table as parquet: quantiles as float32 (they are rounded to 0.1),
+# sorted by station with about 50 stations per row group, so a reader can
+# fetch one station's rows by the triplet statistics.
+write_outlook_pq <- function(x, path) {
+  x <- dplyr::arrange(x, triplet, factor(flavor, levels = SNOTEL_FLAVORS), date)
+  tab <- arrow::arrow_table(x)
+  for (nm in c(names(SNODAS_QUANTILES), "p_snow_free")) tab[[nm]] <- tab[[nm]]$cast(arrow::float32())
+  fs::dir_create(dirname(path))
+  arrow::write_parquet(tab, sink = path, compression = "zstd", compression_level = 13L,
+                       chunk_size = 50L * length(SNOTEL_FLAVORS) * dplyr::n_distinct(x$date))
+  s3_mark_fresh(path)
+  invisible(path)
+}
+
+#' The outlook from one date to the end of its water year, every period:
+#' normals/{period}/outlook/wy{wy}/{date}.parquet (R/outlook.R). Every day's
+#' outlook is kept, so the forecasts can be checked against what happened.
+#'
+#' @return The periods written (none if the normals have no outlook columns
+#'   yet, or the date has no SWE).
+stage_outlook <- function(date, periods = SNOTEL_PERIODS, upload = TRUE) {
+  date <- lubridate::as_date(date)
+  wy   <- water_year(date)
+  message("Outlook: from ", format(date))
+  ref_path <- s3_local(reference_key(wy), refresh = FALSE)
+  if (is.null(ref_path)) { message("  No normals for WY", wy, " yet"); return(invisible(character())) }
+  sm  <- swe_matrix(arrow::read_parquet(ref_path))
+  obs <- archive_swe(from = date, before = date + 1L)
+
+  done <- character()
+  for (period in periods) {
+    np <- s3_local(file.path(normals_prefix(period, wy), "normals.parquet"), refresh = FALSE)
+    if (is.null(np)) { message("  ", period, ": no normals"); next }
+    t0 <- Sys.time()
+    ol <- calc_station_outlook(sm, arrow::read_parquet(np), normals_years(sm, wy, period), obs, date)
+    if (is.null(ol)) { message("  ", period, ": no outlook (normals without outlook columns, or no SWE)"); next }
+    local <- write_outlook_pq(ol, file.path(OUTPUT_DIR, outlook_key(period, date)))
+    if (upload) s3_put_file(local, S3_BUCKET, outlook_key(period, date), content_type = PARQUET_TYPE)
+    message("  ", period, ": ", dplyr::n_distinct(ol$triplet), " stations to ", format(max(ol$date)),
+            " in ", round(difftime(Sys.time(), t0, units = "secs")), " s")
+    done <- c(done, period)
+  }
+  invisible(done)
+}
+
+
 # ── Plots ─────────────────────────────────────────────────────────────────────
 
 #' Per-station seasonal SWE plots for one date:
@@ -220,11 +277,14 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
     prov <- s3_local(file.path(normals_prefix(period, wy), "provenance.json"), refresh = FALSE)
     if (!is.null(prov)) ref_years_out[[period]] <- jsonlite::read_json(prov, simplifyVector = TRUE)$reference_water_years
 
+    outlook <- outlook_for_plots(period, date, observed)
+
     todo <- if (is.null(stations)) unique(observed$triplet) else stations
     todo <- sort(intersect(todo, unique(normals$triplet)))
     n_stations <- max(n_stations, length(todo))
     normals  <- split(normals[normals$triplet %in% todo, ], normals$triplet[normals$triplet %in% todo])
     observed <- split(observed[observed$triplet %in% todo, ], observed$triplet[observed$triplet %in% todo])
+    outlook  <- if (!is.null(outlook)) split(outlook, outlook$triplet)
 
     plot_station <- function(trip) {
       st <- meta[meta$triplet == trip, ]
@@ -237,14 +297,16 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
       # Observed SWE only through the plotted date, so a rerun for an earlier
       # date does not pick up later observations.
       x[x$date > date, c("swe", "swe_ptile")] <- NA
-      y_max <- max(x$q0990, x$swe, 0, na.rm = TRUE)
+      ol <- outlook[[trip]]
+      y_max <- max(x$q0990, x$swe, ol$q0900, 0, na.rm = TRUE)
       # The station's own reference years; the period's if it has no normals.
       ref_years <- if (all(is.na(x$q0500))) ref_years_out[[period]]
                    else c(min(x$ref_first_wy, na.rm = TRUE), max(x$ref_last_wy, na.rm = TRUE))
       for (fl in names(SNOTEL_PLOT_FLAVORS)) {
         xs <- x[x$flavor == fl, ]
         snodas_save_png(plot_snotel(xs, st, normals_label = SNOTEL_PLOT_FLAVORS[[fl]],
-                                    ref_years = ref_years, y_max = if (y_max > 0) y_max),
+                                    ref_years = ref_years, y_max = if (y_max > 0) y_max,
+                                    outlook = if (!is.null(ol)) ol[ol$flavor == fl, ]),
                         file.path(out_root, period, fl, "swe", "usdm", paste0(st$station, ".png")))
       }
       invisible(TRUE)
@@ -295,6 +357,26 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
 }
 
 
+# The outlook's likely range for a plotted date: the day's table if
+# stage_outlook() wrote one, otherwise computed here from the observed table's
+# SWE (e.g. for a backfilled date). NULL if the normals have no outlook columns.
+outlook_for_plots <- function(period, date, observed) {
+  cols <- c("flavor", "date", "triplet", "q0100", "q0900")
+  path <- s3_local(outlook_key(period, date), refresh = FALSE)
+  if (!is.null(path)) return(arrow::read_parquet(path, col_select = dplyr::all_of(cols)))
+  wy  <- water_year(date)
+  ref <- s3_local(reference_key(wy), refresh = FALSE)
+  np  <- s3_local(file.path(normals_prefix(period, wy), "normals.parquet"), refresh = FALSE)
+  if (is.null(ref) || is.null(np)) return(NULL)
+  sm  <- swe_matrix(arrow::read_parquet(ref))
+  d   <- date
+  obs <- observed[observed$date == d & observed$flavor == SNOTEL_FLAVORS[1], ]
+  ol  <- calc_station_outlook(sm, arrow::read_parquet(np), normals_years(sm, wy, period),
+                              tibble::tibble(triplet = obs$triplet, wteq = obs$swe), date)
+  if (!is.null(ol)) ol[, cols]
+}
+
+
 # ── Publish ───────────────────────────────────────────────────────────────────
 
 #' Copy the current tables into latest/ (server-side) and write
@@ -308,7 +390,9 @@ stage_publish <- function(date) {
 
   copies <- c(stats::setNames(S3_KEY_STATIONS, file.path(S3_PREFIX_LATEST, "stations.parquet")),
               stats::setNames(vapply(SNOTEL_PERIODS, \(p) observed_key(p, wy), ""),
-                              file.path(S3_PREFIX_LATEST, paste0("observed_", SNOTEL_PERIODS, ".parquet"))))
+                              file.path(S3_PREFIX_LATEST, paste0("observed_", SNOTEL_PERIODS, ".parquet"))),
+              stats::setNames(vapply(SNOTEL_PERIODS, \(p) outlook_key(p, date), ""),
+                              file.path(S3_PREFIX_LATEST, paste0("outlook_", SNOTEL_PERIODS, ".parquet"))))
   files <- character()
   for (dest in names(copies)) {
     src <- copies[[dest]]
@@ -324,6 +408,8 @@ stage_publish <- function(date) {
 
   normals <- purrr::compact(stats::setNames(lapply(SNOTEL_PERIODS, \(p)
     if (s3_exists(file.path(normals_prefix(p, wy), "normals.parquet"))) normals_prefix(p, wy)), SNOTEL_PERIODS))
+  outlooks <- purrr::compact(stats::setNames(lapply(SNOTEL_PERIODS, \(p)
+    if (file.path(S3_PREFIX_LATEST, paste0("outlook_", p, ".parquet")) %in% files) outlook_key(p, date)), SNOTEL_PERIODS))
   plots_key <- file.path(S3_PREFIX_PLOTS, format(date))
   manifest <- jsonlite::toJSON(
     purrr::compact(list(
@@ -333,6 +419,7 @@ stage_publish <- function(date) {
       archive     = S3_KEY_ARCHIVE,
       files       = files,
       normals     = if (length(normals)) normals,
+      outlook     = if (length(outlooks)) outlooks,
       plots       = if (s3_exists(file.path(plots_key, "index.json"))) plots_key
     )),
     auto_unbox = TRUE, pretty = TRUE)
