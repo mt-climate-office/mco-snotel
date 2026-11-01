@@ -18,7 +18,7 @@
 #          (outlook_lengths()), and stored in the normals as outlook_length.
 #   alpha  the persistence shape: 1 widens fast from the start, 2 starts
 #          narrow and fans out later. Calibrated by period, flavor and day of
-#          the year from a hindcast (data/outlook_alpha.csv), and stored in the
+#          the year from a hindcast (config/outlook_alpha.csv), and stored in the
 #          normals as outlook_alpha.
 #
 # A fitted chance of no snow below half a reference year (0.5 / n_valid) is
@@ -31,7 +31,7 @@
 # relaxes to the normals as rho fades (outlook_anchor()). Within the
 # distribution the ratio is about 1.
 
-OUTLOOK_ALPHA_FILE <- "data/outlook_alpha.csv"
+OUTLOOK_ALPHA_FILE <- "config/outlook_alpha.csv"
 OUTLOOK_FIT_LAGS   <- c(3, 7, 14, 21, 30, 45, 60, 90, 120)   # days, for fitting l
 OUTLOOK_POOL_DAYS  <- 15L    # issue dates pooled either side when fitting l
 OUTLOOK_MIN_PAIRS  <- 8L     # reference years needed for a lag correlation
@@ -186,7 +186,7 @@ outlook_fit_lengths <- function(cr, alpha) {
 }
 
 #' Persistence lengths and shapes for every station, flavor and date of one
-#' period's normals, with alpha from data/outlook_alpha.csv.
+#' period's normals, with alpha from config/outlook_alpha.csv.
 #'
 #' @return flavor, date, triplet, outlook_length (days), outlook_alpha.
 outlook_lengths <- function(sm, normals, years, period) {

@@ -114,7 +114,7 @@ maximum for `ecdf`, or past z = ±4), the quantiles are scaled by
   across years from a date to 3–120 days later (issue dates within ±15 days pooled), fitted
   by `rho(h)`. It is stored in the normals as `outlook_length`.
 - **`alpha` (persistence shape)** is calibrated, not calculated: one value per period,
-  flavor and day of the year in `data/outlook_alpha.csv`, a smooth yearly curve (two Fourier
+  flavor and day of the year in `config/outlook_alpha.csv`, a smooth yearly curve (two Fourier
   harmonics) fitted so the outlook's 80% and 50% ranges hold the outcome 80% and 50% of the
   time. It runs from about 0.7 in early winter (the range opens fast) to about 1.8 in April
   (it starts narrow and fans out). It is stored in the normals as `outlook_alpha`.
@@ -126,7 +126,7 @@ CRPS against the normals alone. Rerun them after a change to the method, and eve
 
 ```bash
 Rscript scripts/outlook-hindcast.R archive.parquet stations.parquet hindcast/ snodas   # and 30yr, por
-Rscript scripts/outlook-calibrate.R hindcast/                                          # writes data/outlook_alpha.csv
+Rscript scripts/outlook-calibrate.R hindcast/                                          # writes config/outlook_alpha.csv
 ```
 
 ## Figures
@@ -193,7 +193,7 @@ R/
   plot_snotel.R        the station plot
   plot.R, utils.R, s3.R, s3_sync.R, zig_spline_normals.R   vendored from mco-snodas
 src/                   Rcpp, vendored from mco-snodas
-data/                  outlook_alpha.csv, the outlook's calibrated persistence shape
+config/                outlook_alpha.csv, the outlook's calibrated persistence shape
 scripts/               test_distributions.R, test_stations.R, check-vendored.sh,
                        check-plot-palette.R, backfill-figures.sh,
                        publish-bucket-readmes.sh, run_local.sh, ecr-push.sh,

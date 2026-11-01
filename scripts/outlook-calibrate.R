@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Calibrate the outlook's persistence shape alpha from scripts/outlook-hindcast.R
-# output, and write data/outlook_alpha.csv.
+# output, and write config/outlook_alpha.csv.
 #
 # For each period and flavor, alpha follows a cyclic Fourier series over the
 # water year (two yearly harmonics), fitted to the hindcast's coverage error:
@@ -16,12 +16,12 @@
 # Usage (from the repo root):
 #   Rscript scripts/outlook-calibrate.R HINDCAST_DIR [OUT_CSV]
 #     HINDCAST_DIR  holds hindcast_30yr.parquet, hindcast_snodas.parquet, hindcast_por.parquet
-#     OUT_CSV       default data/outlook_alpha.csv
+#     OUT_CSV       default config/outlook_alpha.csv
 
 suppressPackageStartupMessages(library(dplyr))
 args <- commandArgs(TRUE)
 D   <- args[1]
-OUT <- if (length(args) >= 2) args[2] else "data/outlook_alpha.csv"
+OUT <- if (length(args) >= 2) args[2] else "config/outlook_alpha.csv"
 K   <- 2L   # yearly harmonics
 PERIODS <- c("30yr", "snodas", "por")
 
