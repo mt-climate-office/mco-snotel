@@ -1,0 +1,87 @@
+# Bucket layout of s3://mco-snodas (docs/bucket-layout.md, sections 5-7).
+# Staged in mco-snotel for review; step 2B moves it to mco-snodas as
+# config/layout.yml. Read by R/layout.R, R/layout_cli.R and Terraform
+# (yamldecode: normals_build_current replaces the hard-coded
+# "${var.normals_build_prefix}/current").
+#
+# layout_version 0 is the layout as it is today, described exactly (inventory:
+# docs/path-inventory.md). Gridded and zonal normals are keyed by date, not by
+# period; flavors keep ecdf / zig / zig_smooth. Validation is strict only
+# from layout_version 1.
+#
+# An artifact is a template string, or a map with `template` and optionally
+# `cache` (short, long, none; required for IDs not in section 6), `formats`
+# (variable -> regex, narrowing a variable for this artifact) and `note`.
+# A template ending in "/" is a prefix: layout_key(id, file = "...").
+
+layout_version: 0
+bucket: mco-snodas
+year_type: wy
+
+# Section 5. Today the normals for date d use the 30 years before it, from
+# WY2004 (normals_reference_years(), R/utils.R); there is one period.
+roles:
+  snodas: {rule: rolling, length: 30, earliest: 2004}
+
+# Canonical name: published name in this version.
+flavors: {empirical: ecdf, fitted: zig, smoothed: zig_smooth}
+types: [swe, hypsomeswe]
+
+# v0-only template variables.
+variables:
+  dir: '([a-z0-9_]+/)*'      # a bucket folder for its README.md, "" for the root
+
+artifacts:
+  # Source data
+  raw_tar:              "raw/SNODAS_{compact_date}.tar"
+  raw_cog:              "cogs/{date}/snodas_{var}_{compact_date}.tif"
+  raw_manifest:         {template: "manifest.parquet", cache: short, note: "v0 only; catalog of tars and COGs"}
+
+  # Gridded normals, one folder per flavor and date
+  normals_grid:         {template: "normals/gridded/{flavor}/{date}/{date}_{flavor}_{stat}.tif",
+                         formats: {stat: '(mean|median|quantiles|params)'}}
+  provenance_grid:      "normals/gridded/{flavor}/{date}/{date}_{flavor}_provenance.json"
+  percentile_grid:      {template: "normals/gridded/{flavor}/{date}/{date}_{flavor}_swe_{stat}.tif",
+                         formats: {stat: '(ptile|standardized)'}}
+  normals_grid_coef:    {template: "normals/gridded/zig_smooth/wy{wy}/zig_smooth_coef.tif", cache: long, note: "v0 only"}
+  normals_grid_diagnostics: {template: "normals/gridded/zig_smooth/wy{wy}/zig_smooth_diagnostics.tif", cache: long, note: "v0 only"}
+  normals_grid_basis:   {template: "normals/gridded/zig_smooth/wy{wy}/zig_smooth_basis.csv", cache: long, note: "v0 only"}
+  normals_grid_model:   {template: "normals/gridded/zig_smooth/wy{wy}/zig_smooth_model.json", cache: long, note: "v0 only"}
+  normals_grid_build:   {template: "normals/gridded/zig_smooth/wy{wy}/build.json", cache: long, note: "v0 only; completion stamp of the yearly build"}
+
+  # Zonal (WBD HUC) normals and observations, one folder per flavor and date
+  normals_table_day:    {template: "normals/zonal/wbd/{flavor}/{date}/{date}_{flavor}_{type}_normals.parquet", cache: long,
+                         note: "v0 only; rewritten by Stage 3 with the day's swe columns"}
+  provenance_day:       {template: "normals/zonal/wbd/{flavor}/{date}/{date}_{flavor}_provenance.json", cache: long, note: "v0 only"}
+  means_day:            {template: "normals/zonal/wbd/raw/{date}/{date}_raw_{type}_means.parquet", cache: long, note: "v0 only"}
+  normals_by_subject:   "normals/zonal/wbd/by_zone/wy{wy}/{subject}_{type}.parquet"
+  percentiles:          "normals/zonal/wbd/observed/wy{wy}_{type}.parquet"
+
+  # Plots and animations
+  plot:                 "plots/{date}/{flavor}/{type}/usdm/{subject}.png"
+  plot_index:           "plots/{date}/index.json"
+  animation:            "animations/wy{wy}/{flavor}/{type}/usdm/{subject}.mp4"
+  animation_index:      {template: "animations/wy{wy}/{flavor}/index.json", cache: short, note: "v0 only"}
+  # Left from an earlier version (snow-year naming; spec section 15, item 3).
+  # No code reads or writes them; listed so every object in the bucket has an artifact.
+  animation_sy:         {template: "animations/sy{wy}/{flavor}/{type}/usdm/{subject}.mp4", cache: short, note: "legacy, read-only"}
+  animation_index_sy:   {template: "animations/sy{wy}/{flavor}/index.json", cache: short, note: "legacy, read-only"}
+
+  # latest/: copies made by Stage 6, which empties latest/ first
+  latest_raw:           {template: "latest/cogs/snodas_{var}.tif", cache: short}
+  latest_grid:          {template: "latest/cogs/{flavor}_{stat}.tif", formats: {stat: '(mean|median|quantiles|params)'}}
+  latest_percentile_grid: {template: "latest/cogs/{flavor}_swe_{stat}.tif", cache: short,
+                           formats: {stat: '(ptile|standardized)'}, note: "v0 only"}
+  latest_grid_provenance: {template: "latest/cogs/{flavor}_provenance.json", cache: short, note: "v0 only"}
+  latest_normals_table_day: {template: "latest/zonal/{flavor}_{type}_normals.parquet", cache: short, note: "v0 only"}
+  latest_provenance_day: {template: "latest/zonal/{flavor}_provenance.json", cache: short, note: "v0 only"}
+  latest_means_day:     {template: "latest/zonal/raw_{type}_means.parquet", cache: short, note: "v0 only"}
+  latest_manifest:      "latest/manifest.json"
+
+  # Internal
+  subjects:             {template: "cache/data/wbd_zones.parquet", cache: none,
+                         note: "the zone table; public in CONSUMERS.md though under cache/"}
+  normals_build:        {template: "normals/build/wy{wy}/", cache: none, note: "yearly build work files; deleted when the build finishes"}
+  normals_build_current: {template: "normals/build/current/", cache: none, note: "work lists the Step Functions machine reads (terraform/normals-annual.tf)"}
+  readme:               {template: "{dir}README.md", cache: long, note: "from s3-docs/ by scripts/publish-bucket-readmes.sh"}
+  cache:                "cache/"

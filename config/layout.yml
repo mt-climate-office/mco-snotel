@@ -1,0 +1,57 @@
+# Bucket layout of s3://mco-snotel (docs/bucket-layout.md, sections 5-7).
+# Read by R/layout.R (layout_key() and friends), R/layout_cli.R for scripts,
+# and Terraform (yamldecode). Pipeline code holds no paths; they are here.
+#
+# layout_version 0 is the layout as it is today, described exactly (inventory:
+# docs/path-inventory.md). It keeps the old names: flavors ecdf / zig /
+# zig_smooth, normals folders named by role and water year, observed_ for the
+# percentiles. Validation is strict only from layout_version 1.
+#
+# An artifact is a template string, or a map with `template` and optionally
+# `cache` (short, long, none; required for IDs not in section 6), `formats`
+# (variable -> regex, narrowing a variable for this artifact) and `note`.
+# A template ending in "/" is a prefix: layout_key(id, file = "...").
+
+layout_version: 0
+bucket: mco-snotel
+year_type: wy
+
+# Section 5. Today: R/normals.R period_years() and SNOTEL_PERIODS.
+roles:
+  30yr:   {rule: rolling, length: 30}                   # W-30 .. W-1
+  snodas: {rule: rolling, length: 30, earliest: 2004}   # max(2004, W-30) .. W-1
+  por:    {rule: por}                                    # each station's first year .. W-1
+
+# Canonical name: published name in this version.
+flavors: {empirical: ecdf, fitted: zig, smoothed: zig_smooth}
+types: [swe]
+
+# v0 spellings of other values: latest/observed_{role}.parquet is the
+# latest copy of the percentiles table.
+values:
+  artifact: {percentiles: observed}
+
+# v0-only template variables.
+variables:
+  dir: '([a-z0-9_]+/)*'      # a bucket folder for its README.md, "" for the root
+
+artifacts:
+  subjects:            {template: "stations/stations.parquet", cache: short}
+  raw:                 "archive/snotel.parquet"
+  reference:           "normals/reference/wy{wy}.parquet"
+  normals_table:       "normals/{role}/wy{wy}/normals.parquet"
+  normals_by_subject:  "normals/{role}/wy{wy}/by_station/{subject}.parquet"
+  provenance:          "normals/{role}/wy{wy}/provenance.json"
+  normals_coef:        {template: "normals/{role}/wy{wy}/zig_smooth_coef.parquet", cache: long, note: "v0 only"}
+  normals_diagnostics: {template: "normals/{role}/wy{wy}/zig_smooth_diagnostics.parquet", cache: long, note: "v0 only"}
+  normals_basis:       {template: "normals/{role}/wy{wy}/zig_smooth_basis.csv", cache: long, note: "v0 only"}
+  normals_model:       {template: "normals/{role}/wy{wy}/zig_smooth_model.json", cache: long, note: "v0 only"}
+  percentiles:         "normals/{role}/observed/wy{wy}.parquet"
+  outlook:             {template: "normals/{role}/outlook/wy{wy}/{date}.parquet", note: "branch outlook; wy is the issue date's"}
+  plot:                "plots/{date}/{role}/{flavor}/{type}/usdm/{subject}.png"
+  plot_index:          "plots/{date}/index.json"
+  latest_subjects:     {template: "latest/stations.parquet", cache: short, note: "v0 only"}
+  latest_copy:         "latest/{artifact}_{role}.parquet"
+  latest_manifest:     "latest/manifest.json"
+  readme:              {template: "{dir}README.md", cache: long, note: "from s3-docs/ by scripts/publish-bucket-readmes.sh"}
+  cache:               "cache/"

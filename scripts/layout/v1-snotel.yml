@@ -1,0 +1,28 @@
+# Sketch of layout_version 1 for mco-snotel: docs/bucket-layout.md section 7,
+# verbatim except cache (cache/v1/, plan step 3.0, so v0 and v1 cannot collide).
+# A test fixture for scripts/test_layout.R, not a configuration in use.
+
+layout_version: 1
+bucket: mco-snotel
+year_type: wy
+roles:
+  snodas: {rule: rolling, length: 30, earliest: 2004}
+  30yr:   {rule: rolling, length: 30}
+  noaa:   {rule: fixed, periods: [[1991, 2020], [2001, 2030]], publish_lag: 1}
+  por:    {rule: por}
+flavors: [empirical, fitted, smoothed]
+types: [swe]
+artifacts:
+  subjects:           "stations.parquet"
+  raw:                "raw/snotel_wy{wy}.parquet"
+  normals_table:      "normals/{period}/normals_{period}.parquet"
+  normals_by_subject: "normals/{period}/by_station/{subject}_{period}.parquet"
+  reference:          "normals/{period}/reference_{period}.parquet"
+  provenance:         "normals/{period}/provenance_{period}.json"
+  percentiles:        "daily/percentiles/{period}/percentiles_{period}_wy{wy}.parquet"
+  outlook:            "daily/outlook/{period}/outlook_{period}_{date}.parquet"
+  plot:               "daily/plots/{period}/{date}/{flavor}/{subject}_{type}_{period}_{flavor}_{date}.png"
+  plot_index:         "daily/plots/{period}/{date}/index_{period}_{date}.json"
+  latest_copy:        "daily/latest/{artifact}_{role}.parquet"
+  latest_manifest:    "daily/latest/manifest.json"
+  cache:              "cache/v1/"
