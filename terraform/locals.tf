@@ -10,5 +10,7 @@ locals {
   # Security groups for Fargate tasks.
   fargate_security_group_ids = var.extra_security_group_ids
 
-  ecr_image_url = "${aws_ecr_repository.pipeline.repository_url}:latest"
+  # Every task (daily run and the annual normals build) runs this exact image.
+  # Deploy a new build by changing image_digest (image.auto.tfvars).
+  ecr_image_url = "${aws_ecr_repository.pipeline.repository_url}@${var.image_digest}"
 }

@@ -9,7 +9,11 @@ resource "aws_ecr_repository" "pipeline" {
   tags = local.common_tags
 }
 
-# Keep only the 5 most recent images to control storage costs
+# Images are pushed as sha-<commit> (CI, scripts/ecr-push.sh) as single
+# manifests, without attestations. The image a task definition pins
+# (image_digest) is also tagged prod-<yyyymmdd>, and those are never expired:
+# a rule's tag match shields an image from every lower-priority rule. Images
+# tagged anything else (older bare-commit tags) are never expired either.
 resource "aws_ecr_lifecycle_policy" "pipeline" {
   repository = aws_ecr_repository.pipeline.name
 
@@ -17,11 +21,34 @@ resource "aws_ecr_lifecycle_policy" "pipeline" {
     rules = [
       {
         rulePriority = 1
-        description  = "Expire images beyond the 5 most recent"
+        description  = "Keep every prod-* image (deployed digests)"
         selection = {
-          tagStatus   = "any"
-          countType   = "imageCountMoreThan"
-          countNumber = 5
+          tagStatus     = "tagged"
+          tagPrefixList = ["prod-"]
+          countType     = "imageCountMoreThan"
+          countNumber   = 9999
+        }
+        action = { type = "expire" }
+      },
+      {
+        rulePriority = 2
+        description  = "Expire untagged images after 7 days"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 7
+        }
+        action = { type = "expire" }
+      },
+      {
+        rulePriority = 3
+        description  = "Keep the 30 newest sha-* builds"
+        selection = {
+          tagStatus     = "tagged"
+          tagPrefixList = ["sha-"]
+          countType     = "imageCountMoreThan"
+          countNumber   = 30
         }
         action = { type = "expire" }
       }

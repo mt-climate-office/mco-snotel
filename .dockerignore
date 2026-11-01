@@ -16,3 +16,9 @@ scripts/
 docker-compose.yml
 test.R
 *.md
+
+# Local scratch that must not reach the image
+.claude/
+**/.DS_Store
+**/.Rhistory
+**/Rplots.pdf

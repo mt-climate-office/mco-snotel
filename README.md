@@ -208,8 +208,13 @@ The bucket is served at `data2.climate.umt.edu/snotel/` by the shared data CDN, 
 `terraform.tfvars`).
 
 The image is built and pushed to ECR by `.github/workflows/docker-publish.yml` on pushes
-to `main`, or by `scripts/ecr-push.sh`. The base image is pinned by digest, and its CRAN
-snapshot (2026-04-23) pins every R package.
+to `main`, or by `scripts/ecr-push.sh`, which prints the commit and digest. The base image
+is pinned by digest, and its CRAN snapshot (2026-04-23) pins every R package.
+
+Builds are tagged `sha-<short commit>` and never `latest`. Every task (daily and annual)
+runs the digest in `terraform/image.auto.tfvars`, so pushing an image deploys nothing. To
+deploy, tag the image `prod-<yyyymmdd>` (the ECR lifecycle policy never expires `prod-*`),
+set `image_digest` to its digest, and `terraform apply`.
 
 ## Data source
 
