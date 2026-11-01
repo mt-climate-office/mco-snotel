@@ -21,6 +21,10 @@ resource "aws_ecs_cluster_capacity_providers" "pipeline" {
 }
 
 resource "aws_ecs_task_definition" "pipeline" {
+  # Keep each superseded revision registered, so a rollback can point the
+  # schedules back at the previous revision (and its pinned digest).
+  skip_destroy = true
+
   family                   = var.project_name
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
@@ -40,12 +44,12 @@ resource "aws_ecs_task_definition" "pipeline" {
       essential = true
 
       environment = [
-        { name = "TZ",                 value = "America/Denver" },
-        { name = "S3_BUCKET",          value = var.s3_bucket_name },
-        { name = "WORK_DIR",           value = "/tmp/snotel" },
-        { name = "KEEP_LOCAL",         value = "FALSE" },
-        { name = "CORES",              value = tostring(var.container_cores) },
-        { name = "CALC_FIGURES",       value = "TRUE" },
+        { name = "TZ", value = "America/Denver" },
+        { name = "S3_BUCKET", value = var.s3_bucket_name },
+        { name = "WORK_DIR", value = "/tmp/snotel" },
+        { name = "KEEP_LOCAL", value = "FALSE" },
+        { name = "CORES", value = tostring(var.container_cores) },
+        { name = "CALC_FIGURES", value = "TRUE" },
         { name = "AWS_DEFAULT_REGION", value = var.aws_region },
       ]
 
