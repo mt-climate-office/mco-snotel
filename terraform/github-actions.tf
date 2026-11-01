@@ -18,10 +18,10 @@ resource "aws_iam_role" "github_actions_ecr_push" {
         Federated = data.aws_iam_openid_connect_provider.github.arn
       }
       Condition = {
-        StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:mt-climate-office/mco-snotel:*"
-        }
+        # Only workflows running on main (pushes and manual runs from main) can
+        # assume this role, not other branches, tags or pull requests.
         StringEquals = {
+          "token.actions.githubusercontent.com:sub" = "repo:mt-climate-office/mco-snotel:ref:refs/heads/main"
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
       }

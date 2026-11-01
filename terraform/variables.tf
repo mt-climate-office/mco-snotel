@@ -15,6 +15,16 @@ variable "aws_account_id" {
   type        = string
 }
 
+variable "image_digest" {
+  description = "Digest (sha256:...) of the ECR image every task runs. Set in image.auto.tfvars; tag the deployed image prod-<date> so the lifecycle policy keeps it."
+  type        = string
+
+  validation {
+    condition     = can(regex("^sha256:[0-9a-f]{64}$", var.image_digest))
+    error_message = "image_digest must be a full sha256:<64 hex> digest, not a tag."
+  }
+}
+
 variable "project_name" {
   description = "Project name used for resource naming and tagging"
   type        = string

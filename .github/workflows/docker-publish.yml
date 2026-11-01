@@ -1,20 +1,28 @@
 name: Build and push Docker image to ECR
 
+# Builds on merges to main that can change the image, and pushes one tag,
+# sha-<short commit>. Nothing is tagged latest: production runs the digest
+# pinned in terraform/image.auto.tfvars, so a push here deploys nothing.
 on:
   push:
     branches: [main]
-    paths:
-      - "Dockerfile"
-      - "R/**"
-      - "src/**"
-      - "*.R"
-      - "*.png"
-      - ".github/workflows/docker-publish.yml"
-  workflow_dispatch:  # allow manual trigger from GitHub UI
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "s3-docs/**"
+      - "terraform/**"
+      - "scripts/**"
+      - ".gitignore"
+  workflow_dispatch:
 
 permissions:
-  id-token: write  # required for OIDC authentication
+  id-token: write # OIDC
   contents: read
+
+# A newer push to main supersedes a build still running.
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   AWS_REGION: us-west-2
@@ -23,10 +31,15 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Short commit
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -38,12 +51,33 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # The docker-container builder, needed for the GitHub Actions layer cache.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # A single image manifest (no attestations), so the pushed digest is the
+      # one a task definition pins and no untagged children are left behind.
       - name: Build and push
-        uses: docker/build-push-action@v5
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${{ steps.sha.outputs.short }}
+
+      - name: Report digest
+        run: |
+          {
+            echo "### ${ECR_REPOSITORY}"
+            echo ""
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Tag: \`sha-${{ steps.sha.outputs.short }}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo ""
+            echo "To deploy, set image_digest in terraform/image.auto.tfvars to this digest."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
