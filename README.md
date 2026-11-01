@@ -280,6 +280,9 @@ first apply AWS emails a confirmation link: **nothing is delivered until it is c
 | At 13:00 America/Denver, `latest/manifest.json` is missing or its `date` is more than 2 days old | Lambda `mco-snotel-freshness` (`freshness.tf`, `lambda/freshness.py`, kept identical to mco-snodas) |
 | The freshness Lambda itself errors | Alarm `mco-snotel-freshness-errors` |
 
+Shadow tasks (`mco-snotel-shadow`, see Shadow runs) never alert: the ECS rule skips their task
+definition, and they log to `/ecs/mco-snotel-shadow`, outside the log alarms.
+
 Test-fire (after the subscription is confirmed):
 
 ```bash

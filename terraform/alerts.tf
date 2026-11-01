@@ -70,7 +70,9 @@ resource "aws_cloudwatch_event_rule" "task_failed" {
     "detail-type" = ["ECS Task State Change"]
     detail = {
       clusterArn = [aws_ecs_cluster.pipeline.arn]
-      lastStatus = ["STOPPED"]
+      # Shadow tasks (shadow.tf) are tests: their failures do not alert.
+      taskDefinitionArn = [{ "anything-but" = { prefix = "arn:aws:ecs:${var.aws_region}:${var.aws_account_id}:task-definition/${var.project_name}-shadow:" } }]
+      lastStatus        = ["STOPPED"]
       "$or" = [
         { containers = { exitCode = [{ "anything-but" = 0 }] } },
         { stopCode = ["TaskFailedToStart"] },

@@ -230,7 +230,7 @@ resource "aws_ecs_task_definition" "shadow" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.pipeline.name
+          "awslogs-group"         = aws_cloudwatch_log_group.shadow.name
           "awslogs-region"        = var.aws_region
           "awslogs-stream-prefix" = "shadow"
         }
@@ -329,5 +329,18 @@ resource "aws_scheduler_schedule" "shadow" {
       maximum_retry_attempts       = 0
       maximum_event_age_in_seconds = 3600
     }
+  }
+}
+
+# Shadow runs log to their own group, so the production log alarms
+# (cloudwatch.tf) never count a shadow run's errors.
+resource "aws_cloudwatch_log_group" "shadow" {
+  name              = "/ecs/${var.project_name}-shadow"
+  retention_in_days = 30
+  tags              = local.shadow_tags
+
+  lifecycle {
+    # An org-level policy sets the KMS key and may lengthen retention.
+    ignore_changes = [kms_key_id, retention_in_days]
   }
 }
