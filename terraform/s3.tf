@@ -70,3 +70,19 @@ resource "aws_s3_bucket_cors_configuration" "outputs" {
 # No lifecycle transition for plots/: at ~75 KB each they are under S3's
 # 128 KB minimum for moving to Standard-IA (and IA would bill each as 128 KB),
 # so the rule mco-snodas uses for its larger plots would do nothing here.
+
+# Server access logs, to the account's access-log bucket (managed by the AWS
+# Landing Zone Accelerator, which accepts logs from any bucket in the account).
+# They record which keys are read, written and deleted, e.g. to check that a
+# change to the layout resolver touches the same keys as before.
+resource "aws_s3_bucket_logging" "outputs" {
+  bucket        = aws_s3_bucket.outputs.id
+  target_bucket = "aws-accelerator-s3-access-logs-${var.aws_account_id}-${var.aws_region}"
+  target_prefix = "${aws_s3_bucket.outputs.bucket}/"
+
+  target_object_key_format {
+    partitioned_prefix {
+      partition_date_source = "EventTime"
+    }
+  }
+}
