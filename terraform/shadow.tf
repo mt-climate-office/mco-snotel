@@ -344,3 +344,17 @@ resource "aws_cloudwatch_log_group" "shadow" {
     ignore_changes = [kms_key_id, retention_in_days]
   }
 }
+
+# Server access logs for the test bucket, beside production's (s3.tf): gate G2
+# compares the keys a shadow run of the current code and of a candidate touch.
+resource "aws_s3_bucket_logging" "shadow" {
+  bucket        = aws_s3_bucket.shadow.id
+  target_bucket = "aws-accelerator-s3-access-logs-${var.aws_account_id}-${var.aws_region}"
+  target_prefix = "${aws_s3_bucket.shadow.bucket}/"
+
+  target_object_key_format {
+    partitioned_prefix {
+      partition_date_source = "EventTime"
+    }
+  }
+}
