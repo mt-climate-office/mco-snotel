@@ -33,7 +33,7 @@ source("R/pipeline_setup.R")
 setup_pipeline()
 
 today        <- lubridate::as_date(lubridate::now(tzone = "America/Denver"))
-wy           <- as.integer(Sys.getenv("WATER_YEAR", unset = water_year(today)))
+wy           <- as.integer(Sys.getenv("WATER_YEAR", unset = normals::year_of(today, "wy")))
 SKIP_REFRESH <- isTRUE(as.logical(Sys.getenv("SKIP_REFRESH", unset = "FALSE")))
 CALC_FIGURES <- isTRUE(as.logical(Sys.getenv("CALC_FIGURES", unset = "FALSE")))
 periods      <- strsplit(Sys.getenv("PERIODS", unset = paste(SNOTEL_PERIODS, collapse = ",")), ",")[[1]]
@@ -52,7 +52,7 @@ stage_normals(wy, periods = periods)
 done <- stage_percentiles(wy, periods = periods)
 
 plots_ok <- TRUE
-if (wy == water_year(today)) {
+if (wy == normals::year_of(today, "wy")) {
   the_date <- latest_swe_date(today)
   if (!is.na(the_date)) {
     if (CALC_FIGURES && any(SNOTEL_PLOT_PERIODS %in% done))

@@ -10,9 +10,15 @@
 
 PARQUET_TYPE <- "application/vnd.apache.parquet"
 
-# Captions for the normals flavors, as in mco-snodas.
-SNOTEL_PLOT_FLAVORS <- c(ecdf = "Empirical History", zig = "Fitted History",
-                         zig_smooth = "Smoothed History")
+# Captions for the normals flavors, under their published names: ecdf =
+# "Empirical History", zig = "Fitted History", zig_smooth = "Smoothed History".
+SNOTEL_PLOT_FLAVORS <- stats::setNames(
+  normals::NORMALS_FLAVOR_CAPTIONS,
+  normals::flavor_legacy(names(normals::NORMALS_FLAVOR_CAPTIONS), "legacy"))
+
+# Write a plot: an 8-bit PNG on the palette shared with mco-snodas.
+# scripts/check-plot-palette.R replaces it to keep full-colour PNGs.
+snotel_save_png <- function(p, file) normals::plot_save_png(p, file)
 
 # Periods plotted every day; viz.R plots others on request.
 SNOTEL_PLOT_PERIODS <- "snodas"
@@ -78,7 +84,7 @@ stage_stations <- function(upload = TRUE) {
 
 #' Refetch the water year to date for stations reporting in it.
 stage_ingest <- function(stations, date = Sys.Date(), upload = TRUE) {
-  begin <- water_year_start(date)
+  begin <- normals::year_start(normals::year_of(lubridate::as_date(date), "wy"), "wy")
   live  <- stations$triplet[stations$active | dplyr::coalesce(stations$end_date >= begin, FALSE)]
   archive_refresh(live, begin, date, upload = upload)
 }
@@ -104,7 +110,7 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
   ref <- archive_swe(before = wy_start) %>% dplyr::arrange(triplet, date)
   ref_local <- write_pq(ref, file.path(OUTPUT_DIR, reference_key(wy)))
   if (upload) s3_put_file(ref_local, S3_BUCKET, reference_key(wy), content_type = PARQUET_TYPE)
-  sm <- swe_matrix(ref)
+  sm <- swe_record(ref)
 
   for (period in periods) {
     t0  <- Sys.time()
@@ -120,11 +126,12 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
       write_pq(x, file.path(out, "by_station", paste0(gsub(":", "_", trip, fixed = TRUE), ".parquet"))))
 
     # Consumers rebuild a day's curves as basis row %*% coefficients, then the
-    # parameters as zig_spline_params() does (model.json spells it out).
-    utils::write.csv(zig_spline_basis(at = 1:365)$X, file.path(out, "zig_smooth_basis.csv"), row.names = FALSE)
-    jsonlite::write_json(list(water_year = wy, period = period, k = ZIG_SMOOTH_K, lambda = as.list(ZIG_SMOOTH_LAMBDA),
+    # parameters as normals::smooth_eval() does (model.json spells it out).
+    zc <- normals::zig_control()
+    utils::write.csv(normals::smooth_basis(1:365, zc$k)$X, file.path(out, "zig_smooth_basis.csv"), row.names = FALSE)
+    jsonlite::write_json(list(water_year = wy, period = period, k = zc$k, lambda = as.list(zc$lambda),
                               method = "daily ZIG statistics smoothed over the year: logit(p_zero) by penalised binomial likelihood; log(l1) and log(L-CV) of positive SWE by penalised weighted least squares (weights = positive years)",
-                              parameters = paste0("p_zero = plogis(eta_nu); L-CV clamped to [", ZIG_SMOOTH_LCV_RANGE[1], ", ", ZIG_SMOOTH_LCV_RANGE[2],
+                              parameters = paste0("p_zero = plogis(eta_nu); L-CV clamped to [", zc$lcv_range[1], ", ", zc$lcv_range[2],
                                                   "]; shape = Hosking's PELGAM approximation from L-CV; scale = l1 / shape"),
                               basis = "mgcv cyclic cubic P-spline (bs = 'cp'), cycle days 1-365 (Oct 1 = 1; Feb 29 = 151.5)",
                               status = "0 ok; 1 no snow on record; 2 p_zero only (too few positive values); 3 no data; 4 p_zero fit did not converge; 5 ok, l1 and L-CV constant",
@@ -134,18 +141,19 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
     jsonlite::write_json(list(water_year = wy, period = period,
                               reference_water_years = range(res$years),
                               reference_record = reference_key(wy),
-                              n_stations = length(sm$stations),
+                              n_stations = length(sm$subjects),
                               n_stations_with_normals = length(with_normals),
-                              min_valid_years = min(10L, length(res$years)),
+                              min_valid_years = snotel_min_valid(res$years),
                               flavors = SNOTEL_FLAVORS,
                               units = "inches",
                               source = "NRCS AWDB REST API, daily WTEQ",
                               methods = "mco-snodas@62fe19a (src/, R/zig_spline_normals.R)",
+                              normals_version = normals_version(),
                               built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
                          file.path(out, "provenance.json"), auto_unbox = TRUE, pretty = TRUE)
 
     if (upload) s3_sync_dir(out, normals_prefix(period, wy))
-    message("  ", period, ": ", length(with_normals), " of ", length(sm$stations),
+    message("  ", period, ": ", length(with_normals), " of ", length(sm$subjects),
             " stations with normals, in ", round(difftime(Sys.time(), t0, units = "mins"), 1), " min")
   }
   invisible(NULL)
@@ -167,7 +175,7 @@ stage_percentiles <- function(wy, periods = SNOTEL_PERIODS, upload = TRUE) {
     message("  No normals for WY", wy, " yet (", reference_key(wy), "); run normals-annual.R")
     return(invisible(character()))
   }
-  sm  <- swe_matrix(arrow::read_parquet(ref_path))
+  sm  <- swe_record(arrow::read_parquet(ref_path))
   obs <- archive_swe(from = lubridate::make_date(wy - 1L, 10, 1),
                      before = lubridate::make_date(wy, 10, 1))
 
@@ -201,7 +209,7 @@ stage_percentiles <- function(wy, periods = SNOTEL_PERIODS, upload = TRUE) {
 stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
                       cores = CORES, upload = TRUE) {
   date <- lubridate::as_date(date)
-  wy   <- water_year(date)
+  wy   <- normals::year_of(date, "wy")
   meta <- stations_read()
   q_cols <- c("q0010", "q0020", "q0050", "q0100", "q0200", "q0300", "q0500",
               "q0700", "q0800", "q0900", "q0950", "q0980", "q0990")
@@ -243,7 +251,7 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
                    else c(min(x$ref_first_wy, na.rm = TRUE), max(x$ref_last_wy, na.rm = TRUE))
       for (fl in names(SNOTEL_PLOT_FLAVORS)) {
         xs <- x[x$flavor == fl, ]
-        snodas_save_png(plot_snotel(xs, st, normals_label = SNOTEL_PLOT_FLAVORS[[fl]],
+        snotel_save_png(plot_snotel(xs, st, normals_label = SNOTEL_PLOT_FLAVORS[[fl]],
                                     ref_years = ref_years, y_max = if (y_max > 0) y_max),
                         file.path(out_root, period, fl, "swe", "usdm", paste0(st$station, ".png")))
       }
@@ -302,7 +310,7 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
 #' that want today's values read it rather than the dated paths.
 stage_publish <- function(date) {
   date <- lubridate::as_date(date)
-  wy   <- water_year(date)
+  wy   <- normals::year_of(date, "wy")
   message("Publish: latest/ for ", format(date))
   s3 <- paws.storage::s3()
 
@@ -344,7 +352,7 @@ stage_publish <- function(date) {
 
 #' The newest date with SWE in this water year's archive, up to `date`.
 latest_swe_date <- function(date = Sys.Date()) {
-  wy_start <- water_year_start(date)
+  wy_start <- normals::year_start(normals::year_of(lubridate::as_date(date), "wy"), "wy")
   x <- arrow::open_dataset(archive_local()) |>
     dplyr::filter(!is.na(wteq), date >= !!wy_start, date <= !!lubridate::as_date(date)) |>
     dplyr::summarise(d = max(date)) |>

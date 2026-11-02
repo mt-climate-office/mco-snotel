@@ -1,5 +1,5 @@
-# Vendored from mco-snodas@62fe19a R/s3.R. Do not edit here: change it upstream,
-# then copy it back (see README, "Vendored code").
+# Copied from mco-snodas@62fe19a R/s3.R. The normals package does no storage,
+# so S3 access stays in each pipeline.
 
 # Download an S3 object to dest. Returns TRUE on success and FALSE on any
 # error, so callers can treat a missing key as absent.

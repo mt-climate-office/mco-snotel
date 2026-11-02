@@ -1,14 +1,14 @@
 #!/usr/bin/env Rscript
-# Check how well the shared plot palette (plot_palette.png, vendored from
-# mco-snodas) fits the station plots.
+# Check how well the shared plot palette (normals::plot_palette(), shared
+# with mco-snodas) fits the station plots.
 #
 # Renders sample station plots in full colour, quantizes them to the shared
-# palette exactly as snodas_save_png() does, and reports the colour error. For
+# palette exactly as normals::plot_save_png() does, and reports the colour error. For
 # comparison, it also fits a 256-colour palette to the station plots alone
 # (pngquant, as mco-snodas's scripts/build-plot-palette.R does) and reports
-# that palette's error. plot_palette.png is never written: it stays
-# mco-snodas's, so legends match across the two products. If the shared
-# palette is clearly worse, rebuild it upstream from both products' plots.
+# that palette's error. The shared palette is never written here: it is the
+# normals package's, so legends match across the two products. If it is
+# clearly worse, rebuild it there from both products' plots.
 #
 # Usage: Rscript scripts/check-plot-palette.R [DATE]
 #   Needs the date's water year normals and percentiles in WORK_DIR or S3, and
@@ -29,7 +29,7 @@ date <- if (length(args)) lubridate::as_date(args[1]) else latest_swe_date(Sys.D
 
 # Full-colour PNGs: the sample must not already be on the palette.
 full_colour <- tempfile("palette-sample-")
-snodas_save_png <- function(p, file, width = 8, height = 16 / 3, dpi = 187.5) {
+snotel_save_png <- function(p, file, width = 8, height = 16 / 3, dpi = 187.5) {
   file <- file.path(full_colour, basename(dirname(dirname(dirname(file)))), basename(file))
   dir.create(dirname(file), recursive = TRUE, showWarnings = FALSE)
   ggplot2::ggsave(file, p, device = ragg::agg_png, width = width, height = height, dpi = dpi, bg = "white")
@@ -67,7 +67,7 @@ status <- system2("pngquant", c("256", "--nofs", "--speed", "1", "--force", "--o
 if (status != 0) stop("pngquant failed (exit ", status, ")")
 own <- unique(rgb_of(quant))
 
-shared <- quant_error(px, snodas_palette()$rgb)
+shared <- quant_error(px, normals::plot_palette()$rgb)
 fitted <- quant_error(px, own)
 message(sprintf("%d plots from %s (%s)", length(files), format(date), paste(unique(basename(dirname(files))), collapse = ", ")))
 message(sprintf("  shared palette (mco-snodas):  mean %.3f, max %.1f (of 255)", shared["mean"], shared["max"]))

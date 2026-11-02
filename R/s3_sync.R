@@ -1,6 +1,6 @@
-# Vendored from mco-snodas@62fe19a: s3_list_prefix() and aws_s3() from
-# R/pipeline_sync.R, s3_exists() from R/normals_annual.R. Do not edit here:
-# change them upstream, then copy them back (see README, "Vendored code").
+# Copied from mco-snodas@62fe19a: s3_list_prefix() and aws_s3() from
+# R/pipeline_sync.R, s3_exists() from R/normals_annual.R. The normals package
+# does no storage, so S3 access stays in each pipeline.
 
 #' List all S3 objects under a prefix, handling pagination.
 s3_list_prefix <- function(s3, bucket, prefix) {

@@ -36,12 +36,14 @@ drops out at the next refetch that covers its date.
 
 ## Normals
 
-The method is mco-snodas's, unchanged; its code is vendored (see below). A station's daily
-SWE series takes the place of a watershed's.
+The method is mco-snodas's, unchanged. Its code is the
+[`normals`](https://github.com/mt-climate-office/normals) R package, shared with mco-snodas
+(see [Normals package](#normals-package) below). A station's daily SWE series takes the place
+of a watershed's.
 
 **Water year.** Years run Oct 1–Sep 30 and are named for the year they end in (2027 is
 2026-10-01 to 2027-09-30). Plot legends label it "WY"; code and file paths use
-`water_year()` and `wy2027/`.
+`normals::year_of(date, "wy")` and `wy2027/`.
 
 **Reference periods.** Each water year's normals are built for three periods:
 
@@ -85,7 +87,7 @@ standardized anomaly is the normal quantile of the percentile, clamped to ±4. N
 readings are treated as missing.
 
 **Quantiles** are columns `q0000`, `q0010`, …, `q1000` (19 probabilities,
-`SNODAS_QUANTILES` in `R/utils.R`). `q0000` is 0; `q1000` is NA wherever SWE can be
+`normals::NORMALS_QUANTILES`). `q0000` is 0; `q1000` is NA wherever SWE can be
 positive.
 
 ## Figures
@@ -93,8 +95,8 @@ positive.
 `stage_viz()` draws one seasonal SWE plot per station and flavor: the water year's normal
 classes in the USDM drought (D4–D0) and pluvial (W0–W4) percentiles, the median dashed, and
 this year's SWE. It is `plot_snodas()` from mco-snodas with SWE in inches
-(`R/plot_snotel.R`). The frame, legend, logos and fixed 256-colour palette are mco-snodas's
-(`R/plot.R`, `plot_palette.png`), so the two products' plots match. A station's three
+(`R/plot_snotel.R`). The frame, legend, logos and fixed 256-colour palette are the normals
+package's `plot_*()` helpers, shared with mco-snodas, so the two products' plots match. A station's three
 flavors share their SWE axis. Files are 1500 × 1000 px, 8-bit PNGs.
 `scripts/check-plot-palette.R` measures how well the shared palette fits station plots
 (mean error 0.16 of 255 against 0.13 for a palette fitted to station plots alone, on
@@ -114,25 +116,21 @@ because the shared subnets have only a few free addresses and each task takes on
 A date takes about 12 minutes. `auto` splits the dates evenly across the tasks, so every
 task starts at once and runs to the end even if the machine that launched it sleeps.
 
-## Vendored code
+## Normals package
 
-The distribution code and the plot helpers are copied from mco-snodas at commit `62fe19a`,
-unchanged:
+The distributions (ECDF, zero-inflated gamma, the smoothed fit), percentiles, calendar
+helpers and the shared plot helpers, logos and palette are the
+[`normals`](https://github.com/mt-climate-office/normals) package, installed in the image at
+one commit (`NORMALS_SHA` in the `Dockerfile`). `R/normals.R` calls it with the arguments
+that reproduce this pipeline's results (normals `docs/API.md`, sections 5 and 6.3) and maps
+its names to the published ones (`ecdf` / `zig` / `zig_smooth`, `zig_shape`, `swe_ptile`, …).
+`provenance.json` records the version as `normals_version`.
 
-| Here | mco-snodas |
-|------|------------|
-| `src/*.cpp`, `src/ecdf_impl.h` | the same |
-| `R/zig_spline_normals.R` | `R/calc_snodas_zig_spline_normals.R` |
-| `R/plot.R` | `R/plot.R`, through `snodas_conditions()` |
-| `R/utils.R` | `R/utils.R`, from `SNODAS_QUANTILES` on |
-| `R/s3.R`, `R/s3_sync.R` | `R/s3.R`; `s3_list_prefix()`, `aws_s3()` from `R/pipeline_sync.R`; `s3_exists()` from `R/normals_annual.R` |
-| `scripts/test_distributions.R` | the same |
-| `mco_logo.png`, `umt_logo.png`, `plot_palette.png` | the same |
+The image runs OpenBLAS single-threaded with a fixed kernel (`OPENBLAS_CORETYPE=Nehalem`),
+so the smoothed fits do not depend on the host's CPU.
 
-Do not edit them here. Change mco-snodas, then copy the files back with their headers and
-update the commit in the headers, in `scripts/check-vendored.sh` and in the table above.
-`scripts/check-vendored.sh [path/to/mco-snodas]` fails if any file differs from its source
-at the recorded commit.
+`R/s3.R` and `R/s3_sync.R` are copied from mco-snodas at `62fe19a`; the package does no
+storage.
 
 ## Repository
 
@@ -141,16 +139,14 @@ mco-snotel.R           daily pipeline
 normals-annual.R       yearly normals build
 viz.R                  plots only, for past dates or other periods
 R/
-  pipeline_setup.R     configuration, S3 keys; sources R/ and compiles src/
+  pipeline_setup.R     configuration, S3 keys; sources R/, registers fonts
   awdb.R               AWDB REST API: stations and daily data, batched
   archive.R            the archive: full and water-year refetches, state, SWE
   normals.R            periods, reference records, station normals and percentiles
   stages.R             stage functions
   plot_snotel.R        the station plot
-  plot.R, utils.R, s3.R, s3_sync.R, zig_spline_normals.R   vendored from mco-snodas
-src/                   Rcpp, vendored from mco-snodas
-scripts/               test_distributions.R, test_stations.R, check-vendored.sh,
-                       check-plot-palette.R, backfill-figures.sh,
+  s3.R, s3_sync.R      S3 helpers, copied from mco-snodas
+scripts/               test_stations.R, check-plot-palette.R, backfill-figures.sh,
                        publish-bucket-readmes.sh, run_local.sh, ecr-push.sh
 scripts/parity/        shadow runs: seed.sh, diff.R, check-identical.sh
 s3-docs/               README.md for each bucket directory
@@ -160,16 +156,14 @@ terraform/             AWS infrastructure
 
 ## Running
 
-Requirements: R 4.5 with the packages in the `Dockerfile`, and the AWS CLI with an `mco`
+Requirements: R 4.5 with the packages in the `Dockerfile` (normals at `NORMALS_SHA`), and the AWS CLI with an `mco`
 profile (`aws sso login --profile mco`).
 
 ```bash
 Rscript mco-snotel.R                       # daily run
 Rscript normals-annual.R                   # yearly build (refetches the whole archive)
 WATER_YEAR=2027 SKIP_REFRESH=true Rscript normals-annual.R
-Rscript scripts/test_distributions.R       # ECDF and ZIG tests (vendored)
 Rscript scripts/test_stations.R            # station normals on live AWDB data
-./scripts/check-vendored.sh                # vendored code still matches mco-snodas
 ./scripts/run_local.sh                     # daily run in Docker, refreshing SSO credentials
 docker compose run --rm mco-snotel normals-annual.R
 ```

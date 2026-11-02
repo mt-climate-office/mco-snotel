@@ -50,7 +50,7 @@ stage_ingest(stations, date = today)
 the_date <- Sys.getenv("SNOTEL_DATE", unset = "") %>%
   { if (nzchar(.)) lubridate::as_date(.) else latest_swe_date(today) }
 if (is.na(the_date)) the_date <- today
-wy <- water_year(the_date)
+wy <- normals::year_of(the_date, "wy")
 
 done <- stage_percentiles(wy)
 
