@@ -202,7 +202,7 @@ daily run can work: run `normals-annual.R` once (it refetches the archive), then
 Terraform in `terraform/` (state in S3): ECR repository, ECS cluster and task (4 vCPU,
 16 GB), the daily and yearly EventBridge schedules (the yearly one runs the same task with
 `normals-annual.R`), the public bucket (public list, CORS for `data2.climate.umt.edu`),
-CloudWatch logs.
+CloudWatch logs, and alerts (below).
 
 The bucket is served at `data2.climate.umt.edu/snotel/` by the shared data CDN, defined in
 [mco-data-cdn](https://github.com/mt-climate-office/mco-data-cdn) (`origin_buckets` in its
@@ -266,6 +266,35 @@ did not rewrite, so point it at outputs, not at the seeded inputs.
 current one.
 
 The scripts in `scripts/parity/` are kept byte-identical in mco-snodas and mco-snotel.
+
+## Alerts
+
+Alerts go to the SNS topic `mco-snotel-alerts`, emailed to `alert_email` (required in
+`terraform/terraform.tfvars`; no default, and no address is kept in the repo). After the
+first apply AWS emails a confirmation link: **nothing is delivered until it is clicked.**
+
+| Fires when | How (Terraform) |
+|---|---|
+| An ECS task (daily or yearly) stops with a non-zero exit (e.g. a plot failure), or never starts (image pull, `ResourceInitializationError`, no free subnet address) | EventBridge rule `mco-snotel-task-failed` (`alerts.tf`) |
+| The daily log reports station plots that failed and were skipped (the run still exits 0): `<period>: n stations in m min; k failed` with k > 0 | Metric filter on `/ecs/mco-snotel` → alarm `mco-snotel-daily-errors` (≥ 1 in an hour) (`cloudwatch.tf`) |
+| At 13:00 America/Denver, `latest/manifest.json` is missing or its `date` is more than 2 days old | Lambda `mco-snotel-freshness` (`freshness.tf`, `lambda/freshness.py`, kept identical to mco-snodas) |
+| The freshness Lambda itself errors | Alarm `mco-snotel-freshness-errors` |
+
+Shadow tasks (`mco-snotel-shadow`, see Shadow runs) never alert: the ECS rule skips their task
+definition, and they log to `/ecs/mco-snotel-shadow`, outside the log alarms.
+
+Test-fire (after the subscription is confirmed):
+
+```bash
+TOPIC=$(terraform -chdir=terraform output -raw alerts_topic_arn)
+aws sns publish --topic-arn "$TOPIC" --subject "mco-snotel test" --message "Test alert"   # delivery
+aws lambda invoke --function-name mco-snotel-freshness /dev/stdout                        # the check (alerts only if stale)
+aws cloudwatch set-alarm-state --alarm-name mco-snotel-daily-errors \
+  --state-value ALARM --state-reason "test"                                               # the alarm action
+```
+
+The ECS rule can be fired by running the task with a command that fails, e.g. a
+`containerOverrides` command of `["-e", "quit(status = 1)"]`.
 
 ## Data source
 

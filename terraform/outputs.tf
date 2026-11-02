@@ -52,3 +52,13 @@ output "shadow_scheduler_arn" {
   description = "Shadow EventBridge schedule (created DISABLED)"
   value       = aws_scheduler_schedule.shadow.arn
 }
+
+output "alerts_topic_arn" {
+  description = "SNS topic for pipeline alerts (emailed to alert_email)"
+  value       = aws_sns_topic.alerts.arn
+}
+
+output "freshness_function_name" {
+  description = "Lambda that checks latest/manifest.json is fresh"
+  value       = aws_lambda_function.freshness.function_name
+}

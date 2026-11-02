@@ -11,3 +11,7 @@ subnet_ids = ["subnet-xxxxxxxxxxxxxxxxx"]
 # extra_security_group_ids = ["sg-xxxxxxxxxxxxxxxxx"]
 
 s3_bucket_name = "mco-snotel"
+
+# Required: where alerts are emailed (SNS topic mco-snotel-alerts). Confirm the
+# subscription from the email AWS sends after apply.
+alert_email = ""
