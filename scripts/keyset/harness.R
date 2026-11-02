@@ -36,8 +36,8 @@ local({
   if (length(args) != 4) stop("Usage: harness.R <code> <seed> <run> <entry script>")
   code  <- normalizePath(args[1]); seed <- normalizePath(args[2])
   run   <- args[3]; entry <- args[4]
-  seed_stations <- file.path(seed, "stations", "stations.parquet")
-  seed_archive  <- file.path(seed, "archive", "snotel.parquet")
+  seed_stations <- file.path(seed, "stations", "stations.parquet")  # layout-ok: local seed mirror
+  seed_archive  <- file.path(seed, "archive", "snotel.parquet")  # layout-ok: local seed mirror
 
   dir.create(run, recursive = TRUE, showWarnings = FALSE)
   unlink(list.files(run, full.names = TRUE, all.files = TRUE, no.. = TRUE), recursive = TRUE)
@@ -52,7 +52,7 @@ local({
              AWS_ACCESS_KEY_ID = "harness", AWS_SECRET_ACCESS_KEY = "harness", AWS_SESSION_TOKEN = "",
              AWS_PROFILE = "", AWS_CONFIG_FILE = "/dev/null", AWS_SHARED_CREDENTIALS_FILE = "/dev/null",
              AWS_ENDPOINT_URL = "http://127.0.0.1:9", AWS_EC2_METADATA_DISABLED = "true")
-  BUCKET_NAME <- Sys.getenv("HARNESS_BUCKET", unset = "mco-snotel")
+  BUCKET_NAME <- Sys.getenv("HARNESS_BUCKET", unset = "mco-snotel")  # layout-ok: harness default
 
   s3_log <- function(op, bucket_name, key, type = "") {
     if (!identical(bucket_name, BUCKET_NAME)) stop("Bucket ", bucket_name, ", expected ", BUCKET_NAME)
