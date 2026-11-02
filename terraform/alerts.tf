@@ -14,7 +14,11 @@ resource "aws_sns_topic" "alerts" {
   tags = local.common_tags
 }
 
+# Alerts are delivered by mesonet-alerts' alarm_format Lambda as Listmonk
+# campaigns ("Snow: Pipeline alerts"), which subscribes to this topic itself.
+# A direct email subscription is optional, e.g. while that route is down.
 resource "aws_sns_topic_subscription" "alerts_email" {
+  count     = var.alert_email == null ? 0 : 1
   topic_arn = aws_sns_topic.alerts.arn
   protocol  = "email"
   endpoint  = var.alert_email

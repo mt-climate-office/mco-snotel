@@ -156,11 +156,12 @@ variable "shadow_trusted_role_arns" {
 # Alerts (alerts.tf, freshness.tf)
 
 variable "alert_email" {
-  description = "Email address subscribed to the <project>-alerts SNS topic. AWS emails it a confirmation link that must be clicked before alerts arrive."
+  description = "Optional email address subscribed directly to the <project>-alerts SNS topic (null: none; alerts reach Listmonk through mesonet-alerts). AWS emails it a confirmation link that must be clicked."
   type        = string
+  default     = null
 
   validation {
-    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alert_email))
+    condition     = var.alert_email == null || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alert_email))
     error_message = "alert_email must be an email address."
   }
 }

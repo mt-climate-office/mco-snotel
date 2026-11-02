@@ -263,9 +263,12 @@ The scripts in `scripts/parity/` are kept byte-identical in mco-snodas and mco-s
 
 ## Alerts
 
-Alerts go to the SNS topic `mco-snotel-alerts`, emailed to `alert_email` (required in
-`terraform/terraform.tfvars`; no default, and no address is kept in the repo). After the
-first apply AWS emails a confirmation link: **nothing is delivered until it is clicked.**
+Alerts go to the SNS topic `mco-snotel-alerts`. mesonet-alerts' `alarm_format` Lambda subscribes
+to it and sends each alert as a Listmonk campaign to the private list "Snow: Pipeline
+alerts" (lists.climate.umt.edu); manage recipients there. If Listmonk is down, the raw
+alert goes to the `mesonet-ops-alerts-fallback` SNS topic instead. `alert_email`
+(optional, in the gitignored `terraform/terraform.tfvars`) also subscribes an address
+directly; AWS emails it a confirmation link that must be clicked.
 
 | Fires when | How (Terraform) |
 |---|---|
