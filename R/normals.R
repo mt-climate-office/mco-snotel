@@ -9,16 +9,19 @@
 #   zig_smooth  the daily ZIG's statistics smoothed over the water year with
 #               cyclic P-splines (smoothed)
 # The package names flavors and parameters by the spec (empirical, shape, …);
-# normals_legacy() and calc_station_percentiles() map them to the published
-# names here, at the edge.
+# normals_published() and calc_station_percentiles() map them to the layout's
+# published names here, at the edge: ecdf / zig / zig_smooth in layout v0,
+# empirical / fitted / smoothed in v1 (layout_flavor(), R/layout.R).
 #
 # Normals for water year W (Oct 1 – Sep 30, named for the year it ends in) are
-# built once, as W starts, from the record before it, for three reference
-# periods (SNOTEL_PERIODS):
+# built once, as W starts, from the record before it, for each role in the
+# layout (SNOTEL_PERIODS, set by setup_pipeline() from layout_roles()). The
+# roles' reference years come from the layout (layout_role_years()):
 #   30yr    the 30 water years before W
 #   snodas  the water years the SNODAS normals use: from WY2004 (SNODAS's
 #           first complete year) or W - 30, whichever is later, to W - 1
 #   por     each station's whole period of record before W
+#   noaa    (layout v1) the latest NOAA 30-year normals period, wy1991-2020
 # A date's reference values are the same calendar day in each reference year
 # (Feb 29 → Feb 28), as normals_reference_years() in mco-snodas. Years with
 # no value are skipped; a date needs min(10, years in the period) valid years
@@ -29,11 +32,11 @@
 # computes them against its saved raw means, so later NRCS edits to the
 # historical record do not shift the normals mid-year.
 
-SNOTEL_PERIODS      <- c("30yr", "snodas", "por")
-SNOTEL_FLAVORS      <- c("ecdf", "zig", "zig_smooth")
 SNODAS_FIRST_WY     <- 2004L
 
-#' Reference water years of a period, for the normals of water year wy.
+#' Reference water years of a period, for the normals of water year wy, as
+#' the code defined them before the layout resolver. The pipeline uses
+#' layout_role_years(); scripts/test_layout.R checks that the two agree.
 #'
 #' @param first_wy First water year of the record (for "por").
 period_years <- function(wy, period, first_wy) {
@@ -44,11 +47,20 @@ period_years <- function(wy, period, first_wy) {
          stop("Unknown period: ", period))
 }
 
-#' A period's reference years within a record (sm, from swe_record()).
+#' A role's reference years within a record (sm, from swe_record()), from the
+#' layout's roles (section 5).
 normals_years <- function(sm, wy, period) {
-  first <- normals::year_of(sm$origin, "wy")
-  years <- period_years(wy, period, first_wy = first)
-  years[years >= first]
+  layout_role_years(period, wy, first_wy = normals::year_of(sm$origin, "wy"))
+}
+
+#' Flavor names as the normals package spells them (empirical, fitted,
+#' smoothed), from the published names of either layout version. A table
+#' copied from layout v0 into v1 keeps ecdf / zig / zig_smooth, so both are
+#' accepted whatever the layout in use.
+flavor_spec <- function(x) {
+  legacy <- x %in% c("ecdf", "zig", "zig_smooth")
+  x[legacy] <- normals::flavor_legacy(x[legacy], "spec")
+  x
 }
 
 #' The record as a normals::record_matrix(), stations as rows, sorted in C
@@ -99,14 +111,16 @@ calc_station_normals <- function(sm, wy, period, cores = 1L) {
     cores         = cores
   )
   side <- normals::smooth_tables(res$smooth, subjects)
-  list(normals = normals_legacy(res$normals), coef = side$coef,
+  list(normals = normals_published(res$normals), coef = side$coef,
        diagnostics = side$diagnostics, years = years)
 }
 
-# The published (layout v0) names: flavors ecdf / zig / zig_smooth, parameters
-# zig_shape / zig_scale / zig_p_zero; day, distribution and fit_status dropped.
-normals_legacy <- function(x) {
-  x$flavor <- normals::flavor_legacy(x$flavor, "legacy")
+# The published table: flavors by the layout's names (layout_flavor()),
+# parameters zig_shape / zig_scale / zig_p_zero; day, distribution and
+# fit_status dropped. The columns are layout v0's in both versions until the
+# section 8 schemas (normals 2.1).
+normals_published <- function(x) {
+  x$flavor <- layout_flavor(x$flavor)
   dplyr::select(x, flavor, date, triplet, n_valid, ref_first_wy, ref_last_wy, mean,
                 zig_shape = shape, zig_scale = scale, zig_p_zero = p_zero,
                 dplyr::all_of(names(normals::NORMALS_QUANTILES)))
@@ -123,7 +137,7 @@ normals_legacy <- function(x) {
 #'   station and date; NULL when there are none.
 calc_station_percentiles <- function(sm, obs, normals, years) {
   spec <- normals
-  spec$flavor <- normals::flavor_legacy(spec$flavor, "spec")
+  spec$flavor <- flavor_spec(spec$flavor)
   spec <- dplyr::rename(spec, shape = zig_shape, scale = zig_scale, p_zero = zig_p_zero)
   pc <- normals::percentiles_table(
     normals      = spec,
@@ -136,7 +150,7 @@ calc_station_percentiles <- function(sm, obs, normals, years) {
     ptile_digits = 2L
   )
   if (!nrow(pc)) return(NULL)
-  pc$flavor <- normals::flavor_legacy(pc$flavor, "legacy")
+  pc$flavor <- layout_flavor(pc$flavor)
   dplyr::select(pc, flavor, date, triplet, swe = value, swe_ptile = ptile,
                 swe_standardized = standardized)
 }

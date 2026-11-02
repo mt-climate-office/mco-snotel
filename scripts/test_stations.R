@@ -12,7 +12,8 @@
 #        (default: Stuart Mountain MT, Garver Creek MT, Old Independence Mine AK)
 
 suppressPackageStartupMessages(library(magrittr))
-for (f in c("normals", "awdb")) source(file.path("R", paste0(f, ".R")))
+for (f in c("layout", "normals", "awdb")) source(file.path("R", paste0(f, ".R")))
+SNOTEL_PERIODS <- layout_roles()
 
 triplets <- commandArgs(TRUE)
 if (!length(triplets)) triplets <- c("901:MT:SNTL", "918:MT:SNTL", "1315:AK:SNTL")
@@ -52,7 +53,7 @@ for (period in SNOTEL_PERIODS) {
   probs <- c(q0100 = 0.1, q0500 = 0.5, q0900 = 0.9)
   diffs <- purrr::map_dbl(sample(normals::year_dates(wy, "wy"), 40), \(d) {
     h <- normals::reference_record(sm, d, years, "wy")
-    e <- n[n$flavor == "ecdf" & n$date == d, ]
+    e <- n[n$flavor == layout_flavor("ecdf") & n$date == d, ]
     max(purrr::map_dbl(seq_along(sm$subjects), \(i) {
       v <- h[i, !is.na(h[i, ])]
       if (length(v) < min(10L, length(years))) return(0)
@@ -70,8 +71,8 @@ for (period in SNOTEL_PERIODS) {
   # 2 and 3. Percentiles
   pc <- calc_station_percentiles(sm, obs, n, years)
   if (is.null(pc) || !nrow(pc)) { cat("  (no observations this water year)\n"); next }
-  z <- dplyr::inner_join(dplyr::filter(pc, flavor == "zig", swe > 0),
-                         dplyr::filter(n, flavor == "zig"), by = c("flavor", "date", "triplet")) %>%
+  z <- dplyr::inner_join(dplyr::filter(pc, flavor == layout_flavor("zig"), swe > 0),
+                         dplyr::filter(n, flavor == layout_flavor("zig")), by = c("flavor", "date", "triplet")) %>%
     dplyr::filter(!is.na(zig_shape))
   if (nrow(z)) {
     direct <- 100 * (z$zig_p_zero + (1 - z$zig_p_zero) * stats::pgamma(z$swe, shape = z$zig_shape, scale = z$zig_scale))

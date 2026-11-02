@@ -21,6 +21,9 @@ setup_pipeline <- function() {
   # config/layout.yml); the bucket is LAYOUT_BUCKET or S3_BUCKET, else the
   # layout's. Local copies sit at the same keys under OUTPUT_DIR.
   S3_BUCKET  <<- layout_bucket()
+  # The roles (periods) built, computed and published: the layout's, in its
+  # order (layout v0: 30yr, snodas, por).
+  SNOTEL_PERIODS <<- layout_roles()
   OUTPUT_DIR <<- Sys.getenv("WORK_DIR",  unset = "s3")
   KEEP_LOCAL <<- isTRUE(as.logical(Sys.getenv("KEEP_LOCAL", unset = "TRUE")))
   CORES      <<- max(1L, as.integer(Sys.getenv("CORES", unset = "1")))

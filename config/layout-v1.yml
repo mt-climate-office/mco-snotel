@@ -1,0 +1,48 @@
+# Bucket layout of s3://mco-snotel, layout_version 1 (docs/bucket-layout.md,
+# sections 3-7, with the 2026-11-02 amendments in section 16).
+#
+# The pipeline writes this layout when run with
+#   LAYOUT_CONFIG=config/layout-v1.yml
+# beside the layout_version 0 writer (config/layout.yml), on the same image:
+# the code is the same and only this file differs. Validation is strict
+# (R/layout.R layout_validate()).
+#
+# Differences from v0 that the code takes from here, not from branches:
+#   - normals are keyed by period, which the resolver derives from role and
+#     water year (section 5), not by role and water year;
+#   - the archive has one file per water year ({wy} in raw);
+#   - flavors are published as empirical / fitted / smoothed, in keys and in
+#     the tables' flavor column;
+#   - artifacts v0 has and v1 does not (normals_coef, ..., latest_subjects,
+#     readme) are not written;
+#   - the cache is cache/v1/, so the two writers never share state.
+
+layout_version: 1
+bucket: mco-snotel
+year_type: wy
+
+# Section 5. For WY2027: snodas wy2004-2026, 30yr wy1997-2026, noaa
+# wy1991-2020, por wypor-2026.
+roles:
+  snodas: {rule: rolling, length: 30, earliest: 2004}
+  30yr:   {rule: rolling, length: 30}
+  noaa:   {rule: fixed, periods: [[1991, 2020], [2001, 2030]], publish_lag: 1}
+  por:    {rule: por}
+
+flavors: [empirical, fitted, smoothed]
+types: [swe]
+
+artifacts:
+  subjects:           "stations.parquet"
+  raw:                "raw/snotel_wy{wy}.parquet"
+  normals_table:      "normals/{period}/normals_{period}.parquet"
+  normals_by_subject: "normals/{period}/by_station/{subject}_{period}.parquet"
+  reference:          "normals/{period}/reference_{period}.parquet"
+  provenance:         "normals/{period}/provenance_{period}.json"
+  percentiles:        "daily/percentiles/{period}/percentiles_{period}_wy{wy}.parquet"
+  outlook:            {template: "daily/outlook/{period}/outlook_{period}_{date}.parquet", note: "not written yet (branch outlook)"}
+  plot:               "daily/plots/{period}/{date}/{flavor}/{subject}_{type}_{period}_{flavor}_{date}.png"
+  plot_index:         "daily/plots/{period}/{date}/index_{period}_{date}.json"
+  latest_copy:        "daily/latest/{artifact}_{role}.parquet"
+  latest_manifest:    "daily/latest/manifest.json"
+  cache:              "cache/v1/"
