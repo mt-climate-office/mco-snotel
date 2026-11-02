@@ -177,3 +177,15 @@ variable "freshness_max_age_days" {
   type        = number
   default     = 2
 }
+
+variable "v1_writer" {
+  description = "Run the layout v1 writer (dual-write) on its own schedule"
+  type        = bool
+  default     = true
+}
+
+variable "v1_schedule_time" {
+  description = "Cron expression for the layout v1 writer, evaluated in schedule_timezone (after the v0 run)"
+  type        = string
+  default     = "cron(45 11 * * ? *)"
+}
