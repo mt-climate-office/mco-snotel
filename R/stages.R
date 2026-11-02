@@ -1,7 +1,10 @@
 # Pipeline stages. Each reads its inputs from S3 (or OUTPUT_DIR) and writes
 # its outputs back, so stages can also be run on their own. Every key comes
-# from the layout resolver (R/layout.R, config/layout.yml), by artifact ID;
-# the comments give today's keys (layout_version 0).
+# from the layout resolver (R/layout.R), by artifact ID, from the layout in
+# LAYOUT_CONFIG: config/layout.yml (layout_version 0, whose keys the comments
+# give) or config/layout-v1.yml. The same code writes either; where they
+# differ (period-keyed normals, the archive split by water year, flavor
+# names, artifacts only one version has) it follows the layout.
 #
 #   stage_stations()     AWDB station metadata → stations/stations.parquet
 #   stage_ingest()       this water year from AWDB → archive/snotel.parquet
@@ -12,11 +15,29 @@
 
 PARQUET_TYPE <- "application/vnd.apache.parquet"
 
-# Captions for the normals flavors, under their published names: ecdf =
-# "Empirical History", zig = "Fitted History", zig_smooth = "Smoothed History".
-SNOTEL_PLOT_FLAVORS <- stats::setNames(
+# Captions for the normals flavors, named by the layout's published names
+# (v0: ecdf = "Empirical History", zig = "Fitted History", zig_smooth =
+# "Smoothed History"; v1: empirical, fitted, smoothed).
+snotel_plot_flavors <- function() stats::setNames(
   normals::NORMALS_FLAVOR_CAPTIONS,
-  normals::flavor_legacy(names(normals::NORMALS_FLAVOR_CAPTIONS), "legacy"))
+  layout_flavor(names(normals::NORMALS_FLAVOR_CAPTIONS)))
+
+# Section 2, rule 5: provenance files and manifests record the layout_version.
+# Layout v0's files predate the field and keep their contents as they were.
+layout_version_field <- function() {
+  v <- layout_config()$layout_version
+  if (v >= 1) list(layout_version = v)
+}
+
+# The plot template relative to its index's folder, written into each
+# plot_index. Layout v0's indexes keep the text they always published.
+plot_index_path <- function() {
+  if (layout_config()$layout_version == 0) return("{period}/{flavor}/{type}/{style}/{station}.png")
+  a <- layout_artifacts()
+  t <- a$template[a$id == "plot"]
+  dir <- sub("[^/]*$", "", a$template[a$id == "plot_index"])
+  if (startsWith(t, dir)) substring(t, nchar(dir) + 1L) else t
+}
 
 # Write a plot: an 8-bit PNG on the palette shared with mco-snodas.
 # scripts/check-plot-palette.R replaces it to keep full-colour PNGs.
@@ -93,8 +114,11 @@ stage_ingest <- function(stations, date = Sys.Date(), upload = TRUE) {
 
 #' Build and publish the frozen normals for water year wy, every period.
 #'
-#' Freezes the record before wy as normals/reference/wy{wy}.parquet, then
-#' writes, for each period, normals/{period}/wy{wy}/:
+#' Freezes the record before wy as the reference (v0: one per water year,
+#' normals/reference/wy{wy}.parquet; v1: one in each period's folder, holding
+#' the same whole record until normals 2.1), then writes, for each period,
+#' normals/{period}/wy{wy}/ (v1: normals/{period}/, the files named by the
+#' period; the zig_smooth_* side files are v0 only):
 #'   normals.parquet                 every flavor, date and station
 #'   by_station/{station}.parquet    the same, one file per station
 #'   zig_smooth_coef.parquet         spline coefficients per station
@@ -105,25 +129,38 @@ stage_ingest <- function(stations, date = Sys.Date(), upload = TRUE) {
 stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = TRUE) {
   wy <- as.integer(wy)
   message("Normals: WY", wy)
+  periods <- intersect(periods, layout_roles(wy))
   wy_start <- lubridate::make_date(wy - 1L, 10, 1)
   ref <- archive_swe(before = wy_start) %>% dplyr::arrange(triplet, date)
-  ref_key   <- layout_key("reference", wy = wy)
-  ref_local <- write_pq(ref, file.path(OUTPUT_DIR, ref_key))
-  if (upload) s3_put_file(ref_local, S3_BUCKET, ref_key, content_type = PARQUET_TYPE)
   sm <- swe_record(ref)
 
+  # Artifacts this layout has; the others are not written.
+  has <- \(id) layout_has(id)
+  refs_written <- character(); folders_built <- character()
   for (period in periods) {
-    t0  <- Sys.time()
-    res <- calc_station_normals(sm, wy, period, cores = cores)
-    # The period's files share one folder, uploaded whole.
+    # The period's files share one folder, uploaded whole. Two roles that
+    # resolve to the same period (section 5) share it, built once.
     path_of <- \(id, ...) file.path(OUTPUT_DIR, layout_key(id, role = period, wy = wy, ...))
     folder  <- layout_prefix("normals_table", role = period, wy = wy, slash = FALSE)
+    if (folder %in% folders_built) { message("  ", period, ": ", folder, " already built"); next }
     out     <- file.path(OUTPUT_DIR, folder)
     unlink(out, recursive = TRUE)
 
+    # The frozen record, written once per key. In its period's folder it goes
+    # up with the folder; elsewhere (v0) it is uploaded now.
+    ref_key <- layout_key("reference", role = period, wy = wy)
+    if (!ref_key %in% refs_written) {
+      ref_local <- write_pq(ref, file.path(OUTPUT_DIR, ref_key))
+      if (upload && !startsWith(ref_key, paste0(folder, "/")))
+        s3_put_file(ref_local, S3_BUCKET, ref_key, content_type = PARQUET_TYPE)
+      refs_written <- c(refs_written, ref_key)
+    }
+
+    t0  <- Sys.time()
+    res <- calc_station_normals(sm, wy, period, cores = cores)
     write_pq(res$normals, path_of("normals_table"))
-    write_pq(res$coef, path_of("normals_coef"))
-    write_pq(res$diagnostics, path_of("normals_diagnostics"))
+    if (has("normals_coef")) write_pq(res$coef, path_of("normals_coef"))
+    if (has("normals_diagnostics")) write_pq(res$diagnostics, path_of("normals_diagnostics"))
     by_station <- split(res$normals, res$normals$triplet)
     purrr::iwalk(by_station, \(x, trip)
       write_pq(x, path_of("normals_by_subject", subject = gsub(":", "_", trip, fixed = TRUE))))
@@ -131,8 +168,10 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
     # Consumers rebuild a day's curves as basis row %*% coefficients, then the
     # parameters as normals::smooth_eval() does (model.json spells it out).
     zc <- normals::zig_control()
-    utils::write.csv(normals::smooth_basis(1:365, zc$k)$X, path_of("normals_basis"), row.names = FALSE)
-    jsonlite::write_json(list(water_year = wy, period = period, k = zc$k, lambda = as.list(zc$lambda),
+    if (has("normals_basis"))
+      utils::write.csv(normals::smooth_basis(1:365, zc$k)$X, path_of("normals_basis"), row.names = FALSE)
+    if (has("normals_model"))
+      jsonlite::write_json(list(water_year = wy, period = period, k = zc$k, lambda = as.list(zc$lambda),
                               method = "daily ZIG statistics smoothed over the year: logit(p_zero) by penalised binomial likelihood; log(l1) and log(L-CV) of positive SWE by penalised weighted least squares (weights = positive years)",
                               parameters = paste0("p_zero = plogis(eta_nu); L-CV clamped to [", zc$lcv_range[1], ", ", zc$lcv_range[2],
                                                   "]; shape = Hosking's PELGAM approximation from L-CV; scale = l1 / shape"),
@@ -141,21 +180,23 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
                               built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
                          path_of("normals_model"), auto_unbox = TRUE, pretty = TRUE)
     with_normals <- unique(res$normals$triplet[!is.na(res$normals$q0500)])
-    jsonlite::write_json(list(water_year = wy, period = period,
+    jsonlite::write_json(c(layout_version_field(),
+                         list(water_year = wy, period = period,
                               reference_water_years = range(res$years),
                               reference_record = ref_key,
                               n_stations = length(sm$subjects),
                               n_stations_with_normals = length(with_normals),
                               min_valid_years = snotel_min_valid(res$years),
-                              flavors = SNOTEL_FLAVORS,
+                              flavors = layout_flavors(),
                               units = "inches",
                               source = "NRCS AWDB REST API, daily WTEQ",
                               methods = "mco-snodas@62fe19a (src/, R/zig_spline_normals.R)",
                               normals_version = normals_version(),
-                              built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
+                              built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))),
                          path_of("provenance"), auto_unbox = TRUE, pretty = TRUE)
 
     if (upload) s3_sync_dir(out, folder)
+    folders_built <- c(folders_built, folder)
     message("  ", period, ": ", length(with_normals), " of ", length(sm$subjects),
             " stations with normals, in ", round(difftime(Sys.time(), t0, units = "mins"), 1), " min")
   }
@@ -173,17 +214,27 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
 stage_percentiles <- function(wy, periods = SNOTEL_PERIODS, upload = TRUE) {
   wy <- as.integer(wy)
   message("Percentiles: WY", wy)
-  ref_path <- s3_local(layout_key("reference", wy = wy), refresh = FALSE)
-  if (is.null(ref_path)) {
-    message("  No normals for WY", wy, " yet (", layout_key("reference", wy = wy), "); run normals-annual.R")
-    return(invisible(character()))
-  }
-  sm  <- swe_record(arrow::read_parquet(ref_path))
-  obs <- archive_swe(from = lubridate::make_date(wy - 1L, 10, 1),
-                     before = lubridate::make_date(wy, 10, 1))
+  periods <- intersect(periods, layout_roles(wy))
 
+  # The frozen record each period's normals were built from, read once per
+  # key (v0: one per water year, shared by every period; v1: one per period),
+  # and the water year's observations, read once.
+  ref_key <- NULL; sm <- NULL; obs <- NULL
   done <- character()
   for (period in periods) {
+    key <- layout_key("reference", role = period, wy = wy)
+    if (!identical(key, ref_key)) {
+      ref_key  <- key
+      ref_path <- s3_local(key, refresh = FALSE)
+      sm <- if (!is.null(ref_path)) swe_record(arrow::read_parquet(ref_path))
+    }
+    if (is.null(sm)) {
+      message("  ", period, ": no normals for WY", wy, " yet (", key, "); run normals-annual.R")
+      next
+    }
+    if (is.null(obs))
+      obs <- archive_swe(archive_local(wy), from = lubridate::make_date(wy - 1L, 10, 1),
+                         before = lubridate::make_date(wy, 10, 1))
     np <- s3_local(layout_key("normals_table", role = period, wy = wy), refresh = FALSE)
     if (is.null(np)) { message("  ", period, ": no normals"); next }
     pc <- calc_station_percentiles(sm, obs, arrow::read_parquet(np), normals_years(sm, wy, period))
@@ -216,11 +267,11 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
   meta <- stations_read()
   q_cols <- c("q0010", "q0020", "q0050", "q0100", "q0200", "q0300", "q0500",
               "q0700", "q0800", "q0900", "q0950", "q0980", "q0990")
-  plots_prefix <- layout_prefix("plot", date = date, slash = FALSE)
-  out_root <- file.path(OUTPUT_DIR, plots_prefix)
+  periods <- intersect(periods, layout_roles(wy))
+  flavors <- snotel_plot_flavors()
   message("Plots for ", format(date), ": ", paste(periods, collapse = ", "))
 
-  errors <- character(); n_stations <- 0L; ref_years_out <- list()
+  errors <- list(); n_stations <- list(); ref_years_out <- list()
   for (period in periods) {
     np <- s3_local(layout_key("normals_table", role = period, wy = wy), refresh = FALSE)
     op <- s3_local(layout_key("percentiles", role = period, wy = wy), refresh = FALSE)
@@ -229,12 +280,16 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
                                                        "ref_first_wy", "ref_last_wy", dplyr::all_of(q_cols)))
     observed <- arrow::read_parquet(op, col_select = c("flavor", "date", "triplet", "swe", "swe_ptile")) %>%
       dplyr::filter(date <= !!date)
+    # Flavors by this layout's names, also in a table copied from another
+    # layout version.
+    normals$flavor  <- layout_flavor(normals$flavor)
+    observed$flavor <- layout_flavor(observed$flavor)
     prov <- s3_local(layout_key("provenance", role = period, wy = wy), refresh = FALSE)
     if (!is.null(prov)) ref_years_out[[period]] <- jsonlite::read_json(prov, simplifyVector = TRUE)$reference_water_years
 
     todo <- if (is.null(stations)) unique(observed$triplet) else stations
     todo <- sort(intersect(todo, unique(normals$triplet)))
-    n_stations <- max(n_stations, length(todo))
+    n_stations[[period]] <- length(todo)
     normals  <- split(normals[normals$triplet %in% todo, ], normals$triplet[normals$triplet %in% todo])
     observed <- split(observed[observed$triplet %in% todo, ], observed$triplet[observed$triplet %in% todo])
 
@@ -253,9 +308,9 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
       # The station's own reference years; the period's if it has no normals.
       ref_years <- if (all(is.na(x$q0500))) ref_years_out[[period]]
                    else c(min(x$ref_first_wy, na.rm = TRUE), max(x$ref_last_wy, na.rm = TRUE))
-      for (fl in names(SNOTEL_PLOT_FLAVORS)) {
+      for (fl in names(flavors)) {
         xs <- x[x$flavor == fl, ]
-        snotel_save_png(plot_snotel(xs, st, normals_label = SNOTEL_PLOT_FLAVORS[[fl]],
+        snotel_save_png(plot_snotel(xs, st, normals_label = flavors[[fl]],
                                     ref_years = ref_years, y_max = if (y_max > 0) y_max),
                         file.path(OUTPUT_DIR, layout_key("plot", date = date, role = period, flavor = fl,
                                                          type = "swe", subject = st$station)))
@@ -275,54 +330,71 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
     if (any(vapply(results, \(r) is.null(r) || inherits(r, "try-error"), logical(1))))
       stop("A plotting worker died (likely out of memory)")
     errs <- unlist(results); errs <- errs[nzchar(errs)]
-    errors <- c(errors, errs)
+    errors[[period]] <- errs
     message("  ", period, ": ", length(todo), " stations in ",
             round(difftime(Sys.time(), t0, units = "mins"), 1), " min; ", length(errs), " failed")
     if (length(errs)) message("  e.g. ", paste(utils::head(errs, 3), collapse = " | "))
   }
   if (!length(ref_years_out)) return(invisible(NULL))
 
-  # One index per date, listing every period plotted for it so far.
-  index_key <- layout_key("plot_index", date = date)
-  old <- if (upload) s3_local(index_key) else file.path(OUTPUT_DIR, index_key)
-  if (!is.null(old) && !file.exists(old)) old <- NULL
-  old_periods <- if (!is.null(old)) jsonlite::read_json(old, simplifyVector = TRUE)$reference_water_years
-  ref_years_all <- utils::modifyList(as.list(old_periods %||% list()), ref_years_out)
-  fs::dir_create(out_root)
-  n_files <- length(list.files(out_root, pattern = "\\.png$", recursive = TRUE))
-  jsonlite::write_json(
-    list(date = format(date), periods = I(names(ref_years_all)), flavors = names(SNOTEL_PLOT_FLAVORS),
-         types = I("swe"), styles = I("usdm"), n_stations = n_stations, n_plots = n_files,
-         path = "{period}/{flavor}/{type}/{style}/{station}.png",
-         reference_water_years = ref_years_all,
-         failed = as.list(errors), created = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
-    file.path(OUTPUT_DIR, index_key), auto_unbox = TRUE, pretty = TRUE)
+  # The plot indexes: layout v0 has one per date, listing every period plotted
+  # for it so far; v1 one per period and date. Each sits in the folder that
+  # holds its plots, is uploaded after them, and so its presence in S3 means
+  # they are complete.
+  done <- names(n_stations)
+  index_of <- vapply(done, \(p) layout_key("plot_index", date = date, role = p), "")
+  out_dirs <- character()
+  for (index_key in unique(index_of[names(ref_years_out)])) {
+    here    <- done[index_of == index_key]
+    folder  <- dirname(index_key)
+    out_dir <- file.path(OUTPUT_DIR, folder)
+    old <- if (upload) s3_local(index_key) else file.path(OUTPUT_DIR, index_key)
+    if (!is.null(old) && !file.exists(old)) old <- NULL
+    old_periods <- if (!is.null(old)) jsonlite::read_json(old, simplifyVector = TRUE)$reference_water_years
+    ref_years_all <- utils::modifyList(as.list(old_periods %||% list()),
+                                       ref_years_out[intersect(here, names(ref_years_out))])
+    fs::dir_create(out_dir)
+    n_files <- length(list.files(out_dir, pattern = "\\.png$", recursive = TRUE))
+    jsonlite::write_json(
+      list(date = format(date), periods = I(names(ref_years_all)), flavors = names(flavors),
+           types = I("swe"), styles = I("usdm"), n_stations = max(0L, unlist(n_stations[here])), n_plots = n_files,
+           path = plot_index_path(),
+           reference_water_years = ref_years_all,
+           failed = as.list(Reduce(c, errors[here], character())),
+           created = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
+      file.path(OUTPUT_DIR, index_key), auto_unbox = TRUE, pretty = TRUE)
 
-  if (upload) {
-    # index.json last, so its presence in S3 means the date's plots are complete.
-    s3_sync_dir(out_root, plots_prefix, exclude = basename(index_key))
-    s3_put_file(file.path(OUTPUT_DIR, index_key), S3_BUCKET, index_key, content_type = "application/json")
-    if (!KEEP_LOCAL) unlink(out_root, recursive = TRUE)
+    if (upload) {
+      s3_sync_dir(out_dir, folder, exclude = basename(index_key))
+      s3_put_file(file.path(OUTPUT_DIR, index_key), S3_BUCKET, index_key, content_type = "application/json")
+      if (!KEEP_LOCAL) unlink(out_dir, recursive = TRUE)
+    }
+    out_dirs <- c(out_dirs, out_dir)
   }
-  invisible(out_root)
+  invisible(out_dirs)
 }
 
 
 # ── Publish ───────────────────────────────────────────────────────────────────
 
 #' Copy the current tables into latest/ (server-side) and write
-#' latest/manifest.json. latest/ is cached briefly by the CDN, so consumers
-#' that want today's values read it rather than the dated paths.
+#' latest/manifest.json (v1: daily/latest/). latest/ is cached briefly by the
+#' CDN, so consumers that want today's values read it rather than the dated
+#' paths. The manifest has layout v0's fields in both versions (section 8's
+#' manifest comes later), plus layout_version from v1.
 stage_publish <- function(date) {
   date <- lubridate::as_date(date)
   wy   <- normals::year_of(date, "wy")
   message("Publish: ", layout_prefix("latest_manifest"), " for ", format(date))
   s3 <- paws.storage::s3()
 
-  # Source keys, named by their latest/ copies.
-  copies <- c(stats::setNames(layout_key("subjects"), layout_key("latest_subjects")),
-              stats::setNames(vapply(SNOTEL_PERIODS, \(p) layout_key("percentiles", role = p, wy = wy), ""),
-                              vapply(SNOTEL_PERIODS, \(p) layout_key("latest_copy", artifact = "percentiles", role = p), "")))
+  roles <- intersect(SNOTEL_PERIODS, layout_roles(wy))
+
+  # Source keys, named by their latest/ copies. v1 has no latest copy of the
+  # stations file, which sits at the root.
+  copies <- c(if (layout_has("latest_subjects")) stats::setNames(layout_key("subjects"), layout_key("latest_subjects")),
+              stats::setNames(vapply(roles, \(p) layout_key("percentiles", role = p, wy = wy), ""),
+                              vapply(roles, \(p) layout_key("latest_copy", artifact = "percentiles", role = p), "")))
   files <- character()
   for (dest in names(copies)) {
     src <- copies[[dest]]
@@ -336,20 +408,28 @@ stage_publish <- function(date) {
     files <- c(files, dest)
   }
 
-  normals <- purrr::compact(stats::setNames(lapply(SNOTEL_PERIODS, \(p)
+  normals <- purrr::compact(stats::setNames(lapply(roles, \(p)
     if (s3_exists(layout_key("normals_table", role = p, wy = wy)))
-      layout_prefix("normals_table", role = p, wy = wy, slash = FALSE)), SNOTEL_PERIODS))
-  plots_key <- layout_prefix("plot", date = date, slash = FALSE)
+      layout_prefix("normals_table", role = p, wy = wy, slash = FALSE)), roles))
+  # The folders of the date's complete plots: one string where every role
+  # shares one index (v0, plots/{date}), else a folder per role (v1).
+  index_keys <- vapply(roles, \(p) layout_key("plot_index", date = date, role = p), "")
+  plots <- if (length(unique(index_keys)) == 1L) {
+    if (s3_exists(index_keys[[1]])) dirname(index_keys[[1]])
+  } else {
+    p <- purrr::compact(lapply(index_keys, \(k) if (s3_exists(k)) dirname(k)))
+    if (length(p)) p
+  }
   manifest <- jsonlite::toJSON(
-    purrr::compact(list(
+    purrr::compact(c(layout_version_field(), list(
       date        = format(date),
       water_year  = wy,
       updated     = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
-      archive     = layout_key("raw"),
+      archive     = layout_key("raw", wy = wy),
       files       = files,
       normals     = if (length(normals)) normals,
-      plots       = if (s3_exists(layout_key("plot_index", date = date))) plots_key
-    )),
+      plots       = plots
+    ))),
     auto_unbox = TRUE, pretty = TRUE)
   manifest_key <- layout_key("latest_manifest")
   s3$put_object(Bucket = S3_BUCKET, Key = manifest_key, Body = charToRaw(manifest), ContentType = "application/json")
@@ -360,7 +440,7 @@ stage_publish <- function(date) {
 #' The newest date with SWE in this water year's archive, up to `date`.
 latest_swe_date <- function(date = Sys.Date()) {
   wy_start <- normals::year_start(normals::year_of(lubridate::as_date(date), "wy"), "wy")
-  x <- arrow::open_dataset(archive_local()) |>
+  x <- arrow::open_dataset(archive_local(normals::year_of(lubridate::as_date(date), "wy"))) |>
     dplyr::filter(!is.na(wteq), date >= !!wy_start, date <= !!lubridate::as_date(date)) |>
     dplyr::summarise(d = max(date)) |>
     dplyr::collect()

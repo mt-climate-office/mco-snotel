@@ -1,0 +1,43 @@
+# How each layout_version 0 artifact of s3://mco-snotel moves to version 1,
+# for scripts/layout/v0-to-v1.R. "current": today only the current water
+# year's keys (v1 contract section 12); "all": every water year (amendment
+# 3 makes that the rule for dated outputs and their normals). What the v1
+# writer rewrites is skipped.
+#
+# One v0 reference (normals/reference/wy{wy}.parquet) serves every role; v1
+# has one per period, so it is copied once for each role.
+
+subjects:            {to: subjects, when: all}
+raw:                 {skip: "written by the v1 writer: v1 splits the archive by water year (raw/snotel_wy{wy}.parquet)"}
+
+# Normals of every period in v0 today (contract amendment 3: older dates'
+# outputs point at their periods). WY2027: snodas wy2004-2026, 30yr
+# wy1997-2026, por wypor-2026. The tables' flavor
+# column keeps v0's values (ecdf, zig, zig_smooth) in a copy; the v1 writer
+# reads either (layout_flavor(), flavor_spec()).
+reference:           {to: [{id: reference, vars: {role: snodas}}, {id: reference, vars: {role: 30yr}},
+                           {id: reference, vars: {role: por}}], when: all}
+normals_table:       {to: normals_table, when: all}
+normals_by_subject:  {to: normals_by_subject, when: all}
+provenance:          {to: provenance, when: all}
+normals_coef:        {skip: "v0 only: spec section 13 drops the smoothed side files (fit_status and lambda move into the table and provenance with normals 2.1)"}
+normals_diagnostics: {skip: "v0 only: spec section 13 drops the smoothed side files"}
+normals_basis:       {skip: "v0 only: spec section 13 drops the smoothed side files"}
+normals_model:       {skip: "v0 only: spec section 13 drops the smoothed side files"}
+
+# Daily tables and plots: every water year today (contract amendment 3),
+# each in its own water year's period. Every plot
+# in the bucket is the snodas role's, so each date's index goes to snodas.
+percentiles:         {to: percentiles, when: all}
+outlook:             {skip: "not today (v1 contract section 13): the outlook is on an unmerged branch"}
+plot:                {to: plot, when: all}
+plot_index:          {to: plot_index, vars: {role: snodas}, when: all}
+
+# latest/
+latest_copy:         {to: latest_copy, when: all}
+latest_subjects:     {skip: "no v1 equivalent: the stations file is at the root (subjects)"}
+latest_manifest:     {skip: "rewritten: v1's manifest lists v1 keys (first v1 run)"}
+
+# Internal
+readme:              {skip: "bucket READMEs come from s3-docs/ (scripts/publish-bucket-readmes.sh); v1's are not written yet"}
+cache:               {skip: "internal: the v1 writer keeps its own state under cache/v1/"}

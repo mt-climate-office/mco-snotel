@@ -10,8 +10,8 @@ resource "aws_scheduler_schedule" "daily" {
     mode = "OFF" # start at exactly the scheduled time
   }
 
-  schedule_expression          = var.schedule_time      # cron(0 10 * * ? *)
-  schedule_expression_timezone = var.schedule_timezone  # America/Denver
+  schedule_expression          = var.schedule_time     # cron(0 10 * * ? *)
+  schedule_expression_timezone = var.schedule_timezone # America/Denver
 
   target {
     arn      = aws_ecs_cluster.pipeline.arn
@@ -59,6 +59,51 @@ resource "aws_scheduler_schedule" "normals_annual" {
       containerOverrides = [{
         name    = "snotel-pipeline"
         command = ["normals-annual.R"]
+      }]
+    })
+
+    ecs_parameters {
+      task_definition_arn = aws_ecs_task_definition.pipeline.arn
+      launch_type         = "FARGATE"
+      task_count          = 1
+
+      network_configuration {
+        assign_public_ip = var.assign_public_ip
+        subnets          = local.resolved_subnet_ids
+        security_groups  = local.fargate_security_group_ids
+      }
+    }
+
+    retry_policy {
+      maximum_retry_attempts       = 1
+      maximum_event_age_in_seconds = 3600
+    }
+  }
+}
+
+# Layout v1 dual-write: the same task and image, writing the v1 layout
+# (config/layout-v1.yml) after the v0 run. It reads and writes only v1 keys and
+# cache/v1/. Removed when v0 is retired; set var.v1_writer = false to stop it.
+resource "aws_scheduler_schedule" "daily_v1" {
+  count      = var.v1_writer ? 1 : 0
+  name       = "${var.project_name}-daily-v1"
+  group_name = "default"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  schedule_expression          = var.v1_schedule_time
+  schedule_expression_timezone = var.schedule_timezone
+
+  target {
+    arn      = aws_ecs_cluster.pipeline.arn
+    role_arn = aws_iam_role.scheduler.arn
+
+    input = jsonencode({
+      containerOverrides = [{
+        name        = "snotel-pipeline"
+        environment = [{ name = "LAYOUT_CONFIG", value = "config/layout-v1.yml" }]
       }]
     })
 

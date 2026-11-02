@@ -148,7 +148,8 @@ R/
   stages.R             stage functions
   plot_snotel.R        the station plot
   s3.R, s3_sync.R      S3 helpers, copied from mco-snodas
-config/                layout.yml: the bucket layout (layout_version 0, today's keys)
+config/                layout.yml: the bucket layout (layout_version 0, today's keys);
+                       layout-v1.yml: layout_version 1, written beside it
 scripts/               test_stations.R, check-plot-palette.R, backfill-figures.sh,
                        publish-bucket-readmes.sh, run_local.sh, ecr-push.sh,
                        test_layout.R, check-no-paths.sh, check-layout-identical.sh
@@ -188,7 +189,7 @@ started. Run with `CORES=1` outside Docker on a Mac.
 | `VIZ_STATIONS` | all with SWE | `viz.R`: triplets to plot (for tests). |
 | `AWDB_CONCURRENCY` | `4` | Parallel AWDB requests. |
 | `S3_BUCKET` | `bucket` in `config/layout.yml` | Bucket (`LAYOUT_BUCKET` overrides it). |
-| `LAYOUT_CONFIG` | `config/layout.yml` | Bucket layout. |
+| `LAYOUT_CONFIG` | `config/layout.yml` | Bucket layout: `config/layout-v1.yml` writes layout v1. |
 | `LAYOUT_PREFIX` | none | A key prefix for every object (local or migration runs). |
 | `WORK_DIR` | `s3` | Local working directory. |
 | `KEEP_LOCAL` | `TRUE` | Keep local copies (`FALSE` in ECS). |
@@ -203,6 +204,13 @@ Every S3 key comes from the layout resolver: code names an artifact
 Rscript scripts/test_layout.R              # the resolver and the layout files
 scripts/check-no-paths.sh                  # no bucket paths outside the resolver
 ```
+
+With `LAYOUT_CONFIG=config/layout-v1.yml` the same code writes layout v1
+(docs/bucket-layout.md, sections 7 and 16): period-keyed normals, the archive split by water
+year, v1 flavor names, and its own state under `cache/v1/`. The two writers run side by side on
+one image and never share a key. `scripts/layout/v0-to-v1.R` (rules in
+`scripts/layout/v0-to-v1.yml`) turns a v0 bucket listing into the (src, dst) list for copying
+history into v1 names.
 
 No CI job runs them yet. A change to how keys are built should also leave the keys a run
 touches as they were: `scripts/keyset/` runs an entry script in the image against a stubbed

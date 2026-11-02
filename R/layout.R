@@ -119,12 +119,13 @@ layout_load <- function(path, validate = TRUE) {
                cache = as.character(a$cache %||% (if (nrow(reg)) reg$cache else NA_character_)),
                mutability = as.character(a$mutability %||% (if (nrow(reg)) reg$mutability else NA_character_)),
                note = as.character(a$note %||% ""),
+               source_name = isTRUE(a$source_name),
                stringsAsFactors = FALSE)
   }))
   formats <- Filter(Negate(is.null), lapply(arts, \(a) if (is.list(a) && !is.null(a$formats))
     vapply(a$formats, as.character, "")))
   if (is.null(tab)) tab <- data.frame(id = character(), template = character(), cache = character(),
-                                      mutability = character(), note = character())
+                                      mutability = character(), note = character(), source_name = logical())
   structure(list(
     source         = source,
     layout_version = x$layout_version,
@@ -195,7 +196,7 @@ layout_validate <- function(layout, strict = isTRUE(layout$layout_version >= 1),
     if (lengths(regmatches(t, gregexpr("\\{", t))) != lengths(regmatches(t, gregexpr("\\}", t))))
       add(id, ": unbalanced braces")
     vars <- .layout_vars(t)
-    bad <- setdiff(vars, known)
+    bad <- setdiff(vars, c(known, names(layout$formats[[id]])))
     if (length(bad)) add(id, ": unknown variable(s) ", paste0("{", bad, "}", collapse = ", "))
     if ("artifact" %in% vars) {
       ids <- c(arts$id, names(layout$values$artifact))
@@ -203,7 +204,8 @@ layout_validate <- function(layout, strict = isTRUE(layout$layout_version >= 1),
     }
     if (strict) {
       lit <- gsub("\\{[^}]*\\}", "", t)
-      if (grepl("[^a-z0-9_./-]", lit)) add(id, ": literal parts must be lower-case ASCII")
+      if (grepl(if (isTRUE(arts$source_name[i])) "[^A-Za-z0-9_./-]" else "[^a-z0-9_./-]", lit))
+        add(id, ": literal parts must be lower-case ASCII (a source's own file names: source_name: true)")
       fname <- basename(sub("/$", "", t))
       if (!grepl("/$", t)) {
         r <- .layout_order[intersect(.layout_vars(fname), names(.layout_order))]
@@ -502,6 +504,7 @@ layout_match <- function(key, layout = layout_config()) {
 #' artifact ID of each key, NA where none matches, "<several>" where more than
 #' one file artifact does.
 layout_classify <- function(keys, layout = layout_config()) {
+  if (!length(keys)) return(character())
   root <- layout_root()
   rel <- if (nzchar(root)) ifelse(startsWith(keys, root), substring(keys, nchar(root) + 1L), NA) else keys
   arts <- layout$artifacts
