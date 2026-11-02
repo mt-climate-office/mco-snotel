@@ -10,7 +10,7 @@
 
 locals {
   freshness_name = "${var.project_name}-freshness"
-  freshness_key  = "latest/manifest.json"
+  freshness_key  = local.layout_templates.latest_manifest
 }
 
 # Built under .terraform/ (git-ignored).
@@ -22,7 +22,7 @@ data "archive_file" "freshness" {
 
 resource "aws_lambda_function" "freshness" {
   function_name    = local.freshness_name
-  description      = "Alert when s3://${var.s3_bucket_name}/${local.freshness_key} is stale or missing"
+  description      = "Alert when s3://${local.s3_bucket_name}/${local.freshness_key} is stale or missing"
   role             = aws_iam_role.freshness.arn
   runtime          = "python3.12"
   handler          = "freshness.handler"
@@ -34,7 +34,7 @@ resource "aws_lambda_function" "freshness" {
   environment {
     variables = {
       PROJECT      = var.project_name
-      BUCKET       = var.s3_bucket_name
+      BUCKET       = local.s3_bucket_name
       KEY          = local.freshness_key
       MAX_AGE_DAYS = tostring(var.freshness_max_age_days)
       TOPIC_ARN    = aws_sns_topic.alerts.arn

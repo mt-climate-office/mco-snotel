@@ -8,7 +8,7 @@
 # AWDB leaves out values marked suspect, so a value NRCS later flags drops out
 # of the archive on the next refresh that covers its date.
 
-archive_local <- function() file.path(OUTPUT_DIR, S3_KEY_ARCHIVE)
+archive_local <- function() file.path(OUTPUT_DIR, layout_key("raw"))
 
 archive_write <- function(tbl, path = archive_local()) {
   fs::dir_create(dirname(path))
@@ -27,12 +27,12 @@ archive_from_parts <- function(files) {
 # Download the archive, if there is one in S3. Returns the local path or NULL.
 archive_get <- function() {
   path <- archive_local()
-  if (s3_get_file(S3_BUCKET, S3_KEY_ARCHIVE, path)) path
+  if (s3_get_file(S3_BUCKET, layout_key("raw"), path)) path
 }
 
 archive_put <- function(path = archive_local()) {
-  s3_put_file(path, S3_BUCKET, S3_KEY_ARCHIVE, content_type = "application/vnd.apache.parquet")
-  message("  Uploaded ", S3_KEY_ARCHIVE)
+  s3_put_file(path, S3_BUCKET, layout_key("raw"), content_type = "application/vnd.apache.parquet")
+  message("  Uploaded ", layout_key("raw"))
 }
 
 #' Refetch every station's whole record and replace the archive.
@@ -64,11 +64,11 @@ archive_refresh <- function(triplets, begin, end, upload = TRUE) {
   message("Archive: refetching ", format(begin), " to ", format(end), " for ",
           length(triplets), " station(s)")
   path <- archive_get()
-  if (is.null(path)) stop("No archive in s3://", S3_BUCKET, "/", S3_KEY_ARCHIVE,
+  if (is.null(path)) stop("No archive in ", layout_uri("raw"),
                           "; run normals-annual.R (or archive_refresh_full()) first")
   old <- arrow::read_parquet(path, as_data_frame = FALSE)
   if (!"wteq_qc" %in% names(old))
-    stop(S3_KEY_ARCHIVE, " is in the old snotelr format; run archive_refresh_full() first")
+    stop(layout_key("raw"), " is in the old snotelr format; run archive_refresh_full() first")
 
   parts <- file.path(OUTPUT_DIR, "work", "awdb-recent")
   unlink(parts, recursive = TRUE)
@@ -102,10 +102,11 @@ archive_state_update <- function(path = archive_local(), upload = TRUE) {
       .by = triplet
     ) |>
     dplyr::mutate(updated_at = Sys.time())
-  local <- file.path(OUTPUT_DIR, S3_KEY_STATE)
+  key   <- layout_key("cache", file = "state.parquet")
+  local <- file.path(OUTPUT_DIR, key)
   fs::dir_create(dirname(local))
   arrow::write_parquet(state, local, compression = "zstd", compression_level = 13L)
-  if (upload) s3_put_file(local, S3_BUCKET, S3_KEY_STATE, content_type = "application/vnd.apache.parquet")
+  if (upload) s3_put_file(local, S3_BUCKET, key, content_type = "application/vnd.apache.parquet")
   invisible(state)
 }
 

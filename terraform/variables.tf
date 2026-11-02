@@ -63,9 +63,9 @@ variable "assign_public_ip" {
 }
 
 variable "s3_bucket_name" {
-  description = "S3 bucket name for all pipeline inputs and outputs"
+  description = "S3 bucket name for all pipeline inputs and outputs (default: the layout's bucket, config/layout.yml)"
   type        = string
-  default     = "mco-snotel"
+  default     = null
 }
 
 variable "schedule_time" {
@@ -119,9 +119,9 @@ variable "log_retention_days" {
 # Shadow runs (shadow.tf)
 
 variable "shadow_s3_bucket_name" {
-  description = "Private test bucket for shadow runs"
+  description = "Private test bucket for shadow runs (default: the layout's bucket with -test)"
   type        = string
-  default     = "mco-snotel-test"
+  default     = null
 }
 
 variable "shadow_image_digest" {

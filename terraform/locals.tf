@@ -4,6 +4,15 @@ locals {
     ManagedBy = "terraform"
   }
 
+  # The bucket layout the pipeline uses (R/layout.R): its bucket, and keys
+  # Terraform needs, from the artifact templates. An artifact is a template
+  # string or a map with `template`.
+  layout           = yamldecode(file("${path.module}/../config/layout.yml"))
+  layout_templates = { for id, a in local.layout.artifacts : id => try(a.template, a) }
+
+  s3_bucket_name        = coalesce(var.s3_bucket_name, local.layout.bucket)
+  shadow_s3_bucket_name = coalesce(var.shadow_s3_bucket_name, "${local.layout.bucket}-test")
+
   # Use explicitly provided subnet IDs, or fall back to all subnets in the VPC.
   resolved_subnet_ids = length(var.subnet_ids) > 0 ? var.subnet_ids : data.aws_subnets.vpc.ids
 

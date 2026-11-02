@@ -1,5 +1,5 @@
 resource "aws_s3_bucket" "outputs" {
-  bucket = var.s3_bucket_name
+  bucket = local.s3_bucket_name
   tags   = local.common_tags
 }
 

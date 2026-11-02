@@ -10,7 +10,8 @@
 # dates evenly over MAX_RUNNING tasks, so every task launches at once and runs
 # to the end without this script (or the machine running it) staying up.
 #
-# The dates' water years need their normals and percentiles in S3.
+# The dates' water years need their normals and percentiles in S3. Keys come
+# from the layout resolver (R/layout_cli.R, which needs R and the yaml package).
 #
 # Usage: [VIZ_PERIODS=snodas] [TASK_CPU=16384 TASK_MEMORY=32768 CORES=16] \
 #          scripts/backfill-figures.sh START END [DATES_PER_TASK|auto] [MAX_RUNNING]
@@ -20,7 +21,7 @@
 set -euo pipefail
 
 PROFILE="mco"
-BUCKET="mco-snotel"
+LAYOUT=(Rscript "$(dirname "$0")/../R/layout_cli.R")
 CLUSTER="mco-snotel"
 TASK_DEF="mco-snotel"
 CONTAINER="snotel-pipeline"
@@ -33,10 +34,11 @@ FORCE="${FORCE:-false}"
 VIZ_PERIODS="${VIZ_PERIODS:-snodas}"
 TASK_CPU="${TASK_CPU:-16384}"; TASK_MEMORY="${TASK_MEMORY:-32768}"; CORES="${CORES:-16}"
 
-# viz.R uploads index.json last, so a period listed in it is done.
+# viz.R uploads index.json last, so a period listed in it is done. $1 is its
+# s3:// URI.
 done_for() {
   local index
-  index="$(aws s3 cp "s3://$BUCKET/plots/$1/index.json" - --profile "$PROFILE" 2>/dev/null)" || return 1
+  index="$(aws s3 cp "$1" - --profile "$PROFILE" 2>/dev/null)" || return 1
   python3 -c "
 import json, sys
 done = set(json.loads(sys.argv[1]).get('periods', []))
@@ -48,10 +50,13 @@ while read -r d; do ALL+=("$d"); done < <(python3 -c "
 import datetime as dt
 d, e = dt.date.fromisoformat('$START'), dt.date.fromisoformat('$END')
 while d <= e: print(d); d += dt.timedelta(days=1)")
+INDEX=()
+while read -r key; do INDEX+=("$key"); done < <("${LAYOUT[@]}" keys plot_index "date=$(IFS=,; echo "${ALL[*]}")")
+BUCKET="$("${LAYOUT[@]}" bucket)"
 PENDING=()
-for d in "${ALL[@]}"; do
-  if [[ "$FORCE" != "true" ]] && done_for "$d"; then continue; fi
-  PENDING+=("$d")
+for i in "${!ALL[@]}"; do
+  if [[ "$FORCE" != "true" ]] && done_for "s3://$BUCKET/${INDEX[i]}"; then continue; fi
+  PENDING+=("${ALL[i]}")
 done
 [[ "$PER_TASK" == auto ]] && PER_TASK=$(( (${#PENDING[@]} + MAX_RUNNING - 1) / MAX_RUNNING ))
 (( PER_TASK > 0 )) || PER_TASK=1
