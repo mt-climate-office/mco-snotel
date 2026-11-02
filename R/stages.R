@@ -1,5 +1,7 @@
 # Pipeline stages. Each reads its inputs from S3 (or OUTPUT_DIR) and writes
-# its outputs back, so stages can also be run on their own.
+# its outputs back, so stages can also be run on their own. Every key comes
+# from the layout resolver (R/layout.R, config/layout.yml), by artifact ID;
+# the comments give today's keys (layout_version 0).
 #
 #   stage_stations()     AWDB station metadata → stations/stations.parquet
 #   stage_ingest()       this water year from AWDB → archive/snotel.parquet
@@ -22,10 +24,6 @@ snotel_save_png <- function(p, file) normals::plot_save_png(p, file)
 
 # Periods plotted every day; viz.R plots others on request.
 SNOTEL_PLOT_PERIODS <- "snodas"
-
-normals_prefix <- function(period, wy) file.path(S3_PREFIX_NORMALS, period, paste0("wy", wy))
-reference_key  <- function(wy) file.path(S3_PREFIX_NORMALS, "reference", paste0("wy", wy, ".parquet"))
-observed_key   <- function(period, wy) file.path(S3_PREFIX_NORMALS, period, "observed", paste0("wy", wy, ".parquet"))
 
 write_pq <- function(x, path, chunk_size = NULL) {
   fs::dir_create(dirname(path))
@@ -62,8 +60,8 @@ s3_local <- function(key, refresh = TRUE) {
 }
 
 stations_read <- function(refresh = FALSE) {
-  path <- s3_local(S3_KEY_STATIONS, refresh)
-  if (is.null(path)) stop("No ", S3_KEY_STATIONS, " in S3; run stage_stations()")
+  path <- s3_local(layout_key("subjects"), refresh)
+  if (is.null(path)) stop("No ", layout_key("subjects"), " in S3; run stage_stations()")
   arrow::read_parquet(path)
 }
 
@@ -73,8 +71,9 @@ stations_read <- function(refresh = FALSE) {
 stage_stations <- function(upload = TRUE) {
   message("Stations: AWDB metadata")
   stations <- awdb_stations()
-  local <- write_pq(stations, file.path(OUTPUT_DIR, S3_KEY_STATIONS))
-  if (upload) s3_put_file(local, S3_BUCKET, S3_KEY_STATIONS, content_type = PARQUET_TYPE)
+  key   <- layout_key("subjects")
+  local <- write_pq(stations, file.path(OUTPUT_DIR, key))
+  if (upload) s3_put_file(local, S3_BUCKET, key, content_type = PARQUET_TYPE)
   message("  ", nrow(stations), " stations, ", sum(stations$active), " active")
   invisible(stations)
 }
@@ -108,27 +107,31 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
   message("Normals: WY", wy)
   wy_start <- lubridate::make_date(wy - 1L, 10, 1)
   ref <- archive_swe(before = wy_start) %>% dplyr::arrange(triplet, date)
-  ref_local <- write_pq(ref, file.path(OUTPUT_DIR, reference_key(wy)))
-  if (upload) s3_put_file(ref_local, S3_BUCKET, reference_key(wy), content_type = PARQUET_TYPE)
+  ref_key   <- layout_key("reference", wy = wy)
+  ref_local <- write_pq(ref, file.path(OUTPUT_DIR, ref_key))
+  if (upload) s3_put_file(ref_local, S3_BUCKET, ref_key, content_type = PARQUET_TYPE)
   sm <- swe_record(ref)
 
   for (period in periods) {
     t0  <- Sys.time()
     res <- calc_station_normals(sm, wy, period, cores = cores)
-    out <- file.path(OUTPUT_DIR, normals_prefix(period, wy))
+    # The period's files share one folder, uploaded whole.
+    path_of <- \(id, ...) file.path(OUTPUT_DIR, layout_key(id, role = period, wy = wy, ...))
+    folder  <- layout_prefix("normals_table", role = period, wy = wy, slash = FALSE)
+    out     <- file.path(OUTPUT_DIR, folder)
     unlink(out, recursive = TRUE)
 
-    write_pq(res$normals, file.path(out, "normals.parquet"))
-    write_pq(res$coef, file.path(out, "zig_smooth_coef.parquet"))
-    write_pq(res$diagnostics, file.path(out, "zig_smooth_diagnostics.parquet"))
+    write_pq(res$normals, path_of("normals_table"))
+    write_pq(res$coef, path_of("normals_coef"))
+    write_pq(res$diagnostics, path_of("normals_diagnostics"))
     by_station <- split(res$normals, res$normals$triplet)
     purrr::iwalk(by_station, \(x, trip)
-      write_pq(x, file.path(out, "by_station", paste0(gsub(":", "_", trip, fixed = TRUE), ".parquet"))))
+      write_pq(x, path_of("normals_by_subject", subject = gsub(":", "_", trip, fixed = TRUE))))
 
     # Consumers rebuild a day's curves as basis row %*% coefficients, then the
     # parameters as normals::smooth_eval() does (model.json spells it out).
     zc <- normals::zig_control()
-    utils::write.csv(normals::smooth_basis(1:365, zc$k)$X, file.path(out, "zig_smooth_basis.csv"), row.names = FALSE)
+    utils::write.csv(normals::smooth_basis(1:365, zc$k)$X, path_of("normals_basis"), row.names = FALSE)
     jsonlite::write_json(list(water_year = wy, period = period, k = zc$k, lambda = as.list(zc$lambda),
                               method = "daily ZIG statistics smoothed over the year: logit(p_zero) by penalised binomial likelihood; log(l1) and log(L-CV) of positive SWE by penalised weighted least squares (weights = positive years)",
                               parameters = paste0("p_zero = plogis(eta_nu); L-CV clamped to [", zc$lcv_range[1], ", ", zc$lcv_range[2],
@@ -136,11 +139,11 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
                               basis = "mgcv cyclic cubic P-spline (bs = 'cp'), cycle days 1-365 (Oct 1 = 1; Feb 29 = 151.5)",
                               status = "0 ok; 1 no snow on record; 2 p_zero only (too few positive values); 3 no data; 4 p_zero fit did not converge; 5 ok, l1 and L-CV constant",
                               built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
-                         file.path(out, "zig_smooth_model.json"), auto_unbox = TRUE, pretty = TRUE)
+                         path_of("normals_model"), auto_unbox = TRUE, pretty = TRUE)
     with_normals <- unique(res$normals$triplet[!is.na(res$normals$q0500)])
     jsonlite::write_json(list(water_year = wy, period = period,
                               reference_water_years = range(res$years),
-                              reference_record = reference_key(wy),
+                              reference_record = ref_key,
                               n_stations = length(sm$subjects),
                               n_stations_with_normals = length(with_normals),
                               min_valid_years = snotel_min_valid(res$years),
@@ -150,9 +153,9 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
                               methods = "mco-snodas@62fe19a (src/, R/zig_spline_normals.R)",
                               normals_version = normals_version(),
                               built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
-                         file.path(out, "provenance.json"), auto_unbox = TRUE, pretty = TRUE)
+                         path_of("provenance"), auto_unbox = TRUE, pretty = TRUE)
 
-    if (upload) s3_sync_dir(out, normals_prefix(period, wy))
+    if (upload) s3_sync_dir(out, folder)
     message("  ", period, ": ", length(with_normals), " of ", length(sm$subjects),
             " stations with normals, in ", round(difftime(Sys.time(), t0, units = "mins"), 1), " min")
   }
@@ -170,9 +173,9 @@ stage_normals <- function(wy, periods = SNOTEL_PERIODS, cores = CORES, upload = 
 stage_percentiles <- function(wy, periods = SNOTEL_PERIODS, upload = TRUE) {
   wy <- as.integer(wy)
   message("Percentiles: WY", wy)
-  ref_path <- s3_local(reference_key(wy), refresh = FALSE)
+  ref_path <- s3_local(layout_key("reference", wy = wy), refresh = FALSE)
   if (is.null(ref_path)) {
-    message("  No normals for WY", wy, " yet (", reference_key(wy), "); run normals-annual.R")
+    message("  No normals for WY", wy, " yet (", layout_key("reference", wy = wy), "); run normals-annual.R")
     return(invisible(character()))
   }
   sm  <- swe_record(arrow::read_parquet(ref_path))
@@ -181,15 +184,15 @@ stage_percentiles <- function(wy, periods = SNOTEL_PERIODS, upload = TRUE) {
 
   done <- character()
   for (period in periods) {
-    np <- s3_local(file.path(normals_prefix(period, wy), "normals.parquet"), refresh = FALSE)
+    np <- s3_local(layout_key("normals_table", role = period, wy = wy), refresh = FALSE)
     if (is.null(np)) { message("  ", period, ": no normals"); next }
     pc <- calc_station_percentiles(sm, obs, arrow::read_parquet(np), normals_years(sm, wy, period))
     if (is.null(pc)) next
     # About a month of one flavor per row group, so a reader can fetch one
     # date's rows by the date statistics.
-    local <- write_pq(pc, file.path(OUTPUT_DIR, observed_key(period, wy)),
-                      chunk_size = 31L * dplyr::n_distinct(pc$triplet))
-    if (upload) s3_put_file(local, S3_BUCKET, observed_key(period, wy), content_type = PARQUET_TYPE)
+    key   <- layout_key("percentiles", role = period, wy = wy)
+    local <- write_pq(pc, file.path(OUTPUT_DIR, key), chunk_size = 31L * dplyr::n_distinct(pc$triplet))
+    if (upload) s3_put_file(local, S3_BUCKET, key, content_type = PARQUET_TYPE)
     message("  ", period, ": ", length(unique(pc$date)), " date(s), ", length(unique(pc$triplet)), " stations")
     done <- c(done, period)
   }
@@ -213,19 +216,20 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
   meta <- stations_read()
   q_cols <- c("q0010", "q0020", "q0050", "q0100", "q0200", "q0300", "q0500",
               "q0700", "q0800", "q0900", "q0950", "q0980", "q0990")
-  out_root <- file.path(OUTPUT_DIR, S3_PREFIX_PLOTS, format(date))
+  plots_prefix <- layout_prefix("plot", date = date, slash = FALSE)
+  out_root <- file.path(OUTPUT_DIR, plots_prefix)
   message("Plots for ", format(date), ": ", paste(periods, collapse = ", "))
 
   errors <- character(); n_stations <- 0L; ref_years_out <- list()
   for (period in periods) {
-    np <- s3_local(file.path(normals_prefix(period, wy), "normals.parquet"), refresh = FALSE)
-    op <- s3_local(observed_key(period, wy), refresh = FALSE)
+    np <- s3_local(layout_key("normals_table", role = period, wy = wy), refresh = FALSE)
+    op <- s3_local(layout_key("percentiles", role = period, wy = wy), refresh = FALSE)
     if (is.null(np) || is.null(op)) { message("  ", period, ": no normals or percentiles for WY", wy); next }
     normals  <- arrow::read_parquet(np, col_select = c("flavor", "date", "triplet",
                                                        "ref_first_wy", "ref_last_wy", dplyr::all_of(q_cols)))
     observed <- arrow::read_parquet(op, col_select = c("flavor", "date", "triplet", "swe", "swe_ptile")) %>%
       dplyr::filter(date <= !!date)
-    prov <- s3_local(file.path(normals_prefix(period, wy), "provenance.json"), refresh = FALSE)
+    prov <- s3_local(layout_key("provenance", role = period, wy = wy), refresh = FALSE)
     if (!is.null(prov)) ref_years_out[[period]] <- jsonlite::read_json(prov, simplifyVector = TRUE)$reference_water_years
 
     todo <- if (is.null(stations)) unique(observed$triplet) else stations
@@ -253,7 +257,8 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
         xs <- x[x$flavor == fl, ]
         snotel_save_png(plot_snotel(xs, st, normals_label = SNOTEL_PLOT_FLAVORS[[fl]],
                                     ref_years = ref_years, y_max = if (y_max > 0) y_max),
-                        file.path(out_root, period, fl, "swe", "usdm", paste0(st$station, ".png")))
+                        file.path(OUTPUT_DIR, layout_key("plot", date = date, role = period, flavor = fl,
+                                                         type = "swe", subject = st$station)))
       }
       invisible(TRUE)
     }
@@ -278,7 +283,7 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
   if (!length(ref_years_out)) return(invisible(NULL))
 
   # One index per date, listing every period plotted for it so far.
-  index_key <- file.path(S3_PREFIX_PLOTS, format(date), "index.json")
+  index_key <- layout_key("plot_index", date = date)
   old <- if (upload) s3_local(index_key) else file.path(OUTPUT_DIR, index_key)
   if (!is.null(old) && !file.exists(old)) old <- NULL
   old_periods <- if (!is.null(old)) jsonlite::read_json(old, simplifyVector = TRUE)$reference_water_years
@@ -291,12 +296,12 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
          path = "{period}/{flavor}/{type}/{style}/{station}.png",
          reference_water_years = ref_years_all,
          failed = as.list(errors), created = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")),
-    file.path(out_root, "index.json"), auto_unbox = TRUE, pretty = TRUE)
+    file.path(OUTPUT_DIR, index_key), auto_unbox = TRUE, pretty = TRUE)
 
   if (upload) {
     # index.json last, so its presence in S3 means the date's plots are complete.
-    s3_sync_dir(out_root, file.path(S3_PREFIX_PLOTS, format(date)), exclude = "index.json")
-    s3_put_file(file.path(out_root, "index.json"), S3_BUCKET, index_key, content_type = "application/json")
+    s3_sync_dir(out_root, plots_prefix, exclude = basename(index_key))
+    s3_put_file(file.path(OUTPUT_DIR, index_key), S3_BUCKET, index_key, content_type = "application/json")
     if (!KEEP_LOCAL) unlink(out_root, recursive = TRUE)
   }
   invisible(out_root)
@@ -311,12 +316,13 @@ stage_viz <- function(date, periods = SNOTEL_PLOT_PERIODS, stations = NULL,
 stage_publish <- function(date) {
   date <- lubridate::as_date(date)
   wy   <- normals::year_of(date, "wy")
-  message("Publish: latest/ for ", format(date))
+  message("Publish: ", layout_prefix("latest_manifest"), " for ", format(date))
   s3 <- paws.storage::s3()
 
-  copies <- c(stats::setNames(S3_KEY_STATIONS, file.path(S3_PREFIX_LATEST, "stations.parquet")),
-              stats::setNames(vapply(SNOTEL_PERIODS, \(p) observed_key(p, wy), ""),
-                              file.path(S3_PREFIX_LATEST, paste0("observed_", SNOTEL_PERIODS, ".parquet"))))
+  # Source keys, named by their latest/ copies.
+  copies <- c(stats::setNames(layout_key("subjects"), layout_key("latest_subjects")),
+              stats::setNames(vapply(SNOTEL_PERIODS, \(p) layout_key("percentiles", role = p, wy = wy), ""),
+                              vapply(SNOTEL_PERIODS, \(p) layout_key("latest_copy", artifact = "percentiles", role = p), "")))
   files <- character()
   for (dest in names(copies)) {
     src <- copies[[dest]]
@@ -331,22 +337,23 @@ stage_publish <- function(date) {
   }
 
   normals <- purrr::compact(stats::setNames(lapply(SNOTEL_PERIODS, \(p)
-    if (s3_exists(file.path(normals_prefix(p, wy), "normals.parquet"))) normals_prefix(p, wy)), SNOTEL_PERIODS))
-  plots_key <- file.path(S3_PREFIX_PLOTS, format(date))
+    if (s3_exists(layout_key("normals_table", role = p, wy = wy)))
+      layout_prefix("normals_table", role = p, wy = wy, slash = FALSE)), SNOTEL_PERIODS))
+  plots_key <- layout_prefix("plot", date = date, slash = FALSE)
   manifest <- jsonlite::toJSON(
     purrr::compact(list(
       date        = format(date),
       water_year  = wy,
       updated     = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
-      archive     = S3_KEY_ARCHIVE,
+      archive     = layout_key("raw"),
       files       = files,
       normals     = if (length(normals)) normals,
-      plots       = if (s3_exists(file.path(plots_key, "index.json"))) plots_key
+      plots       = if (s3_exists(layout_key("plot_index", date = date))) plots_key
     )),
     auto_unbox = TRUE, pretty = TRUE)
-  s3$put_object(Bucket = S3_BUCKET, Key = file.path(S3_PREFIX_LATEST, "manifest.json"),
-                Body = charToRaw(manifest), ContentType = "application/json")
-  message("  latest/manifest.json: ", length(files), " file(s)")
+  manifest_key <- layout_key("latest_manifest")
+  s3$put_object(Bucket = S3_BUCKET, Key = manifest_key, Body = charToRaw(manifest), ContentType = "application/json")
+  message("  ", manifest_key, ": ", length(files), " file(s)")
   invisible(NULL)
 }
 

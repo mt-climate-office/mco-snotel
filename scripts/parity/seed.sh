@@ -23,6 +23,9 @@
 #                            (it is versioned; versions expire after 30 days).
 #
 # Kept byte-identical in mco-snodas and mco-snotel (check-identical.sh).
+# Buckets and keys come from the project's layout resolver (R/layout_cli.R and
+# config/layout.yml; for the other project, from its checkout beside this one,
+# or LAYOUT_CONFIG). The keys below are those of layout_version 0.
 #
 # SNODAS, for each date d (stages.R, calc_*_normals.R, wbd.R):
 #   cache/dates_state.parquet, cache/normals_state.parquet, manifest.parquet
@@ -87,8 +90,17 @@ if [[ -z "$PROJECT" ]]; then
 fi
 [[ "$PROJECT" == snodas || "$PROJECT" == snotel ]] || { echo "Unknown project: $PROJECT" >&2; exit 2; }
 
-SRC="mco-${PROJECT}"
-DST="mco-${PROJECT}-test"
+# The project's layout: this repository's, or the other project's checkout
+# beside it. Production keys only: LAYOUT_BUCKET, S3_BUCKET and LAYOUT_PREFIX
+# are ignored.
+if [[ -f "$REPO_ROOT/mco-${PROJECT}.R" ]]; then LAYOUT_YML="$REPO_ROOT/config/layout.yml"
+else LAYOUT_YML="${LAYOUT_CONFIG:-$REPO_ROOT/../mco-${PROJECT}/config/layout.yml}"; fi
+[[ -f "$LAYOUT_YML" ]] || { echo "No layout for $PROJECT at $LAYOUT_YML; set LAYOUT_CONFIG" >&2; exit 2; }
+L() { env -u LAYOUT_BUCKET -u S3_BUCKET -u LAYOUT_PREFIX LAYOUT_CONFIG="$LAYOUT_YML" \
+        Rscript "$REPO_ROOT/R/layout_cli.R" "$@"; }
+
+SRC="$(L bucket)"
+DST="${SRC}-test"
 PROFILE="${PROFILE:-mco-shadow-${PROJECT}}"
 # Never write to anything but a -test bucket.
 [[ "$DST" == *-test && "$DST" != "$SRC" ]] || { echo "Refusing to write to $DST" >&2; exit 2; }
@@ -110,11 +122,12 @@ add_key() {
 }
 # Optional key: silently skipped if absent.
 add_key_opt() { list_prefix "$1" | awk -F'\t' -v k="$1" '$1 == k' >> "$PLAN"; }
-# Every key under a prefix, minus keys matching an (awk) regex.
+# Every key under a prefix, minus the keys given after it.
 add_prefix() {
-  local n
-  n="$(list_prefix "$1" | awk -F'\t' -v re="${2:-}" 're == "" || $1 !~ re' | tee -a "$PLAN" | wc -l)"
-  ((n > 0)) || echo "$1 (empty prefix)" >> "$MISSING"
+  local p="$1" n; shift
+  n="$(list_prefix "$p" | awk -F'\t' -v skip="$*" 'BEGIN { split(skip, s, " "); for (i in s) x[s[i]] = 1 }
+                                                   !($1 in x)' | tee -a "$PLAN" | wc -l)"
+  ((n > 0)) || echo "$p (empty prefix)" >> "$MISSING"
 }
 # One key as it was just before $ASOF (the newest version older than it; none
 # if that is a delete marker or there is no older version).
@@ -140,58 +153,77 @@ minus_years() {
 
 if [[ "$PROJECT" == snodas ]]; then
   D0="${DATES[0]}"; D0C="${D0//-/}"
+  TAR0="$(L key raw_tar date="$D0")"
   if [[ -z "$ASOF" ]]; then
-    ASOF="$(aws_ s3api list-objects-v2 --bucket "$SRC" --prefix "raw/SNODAS_${D0C}.tar" --output json \
-              | jq -r --arg k "raw/SNODAS_${D0C}.tar" '.Contents[]? | select(.Key == $k) | .LastModified')"
-    [[ -n "$ASOF" ]] || { echo "No raw/SNODAS_${D0C}.tar in $SRC; pass --asof" >&2; exit 1; }
+    ASOF="$(aws_ s3api list-objects-v2 --bucket "$SRC" --prefix "$TAR0" --output json \
+              | jq -r --arg k "$TAR0" '.Contents[]? | select(.Key == $k) | .LastModified')"
+    [[ -n "$ASOF" ]] || { echo "No $TAR0 in $SRC; pass --asof" >&2; exit 1; }
   fi
-  echo "State as of: $ASOF (just before ${D0}'s tar reached raw/)" >&2
+  echo "State as of: $ASOF (just before ${D0}'s tar reached $(dirname "$TAR0")/)" >&2
 
-  for k in cache/dates_state.parquet cache/normals_state.parquet manifest.parquet; do add_key_asof "$k"; done
-
-  if ((NOAA == 0)); then
-    list_prefix raw/SNODAS_ | awk -F'\t' -v d0="$D0C" '
-      $1 ~ /^raw\/SNODAS_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]\.tar$/ && substr($1, 12, 8) >= d0' >> "$PLAN"
-  fi
-
-  for f in snodas_mask.tif snodas_elevation.tif wbd_huc8.tif wbd_huc8.tif.aux.xml \
-           wbd_names.parquet wbd_zones.parquet; do
-    add_key "cache/data/$f"
+  for k in "$(L key cache file=dates_state.parquet)" "$(L key cache file=normals_state.parquet)" \
+           "$(L key raw_manifest)"; do
+    add_key_asof "$k"
   done
+
+  # The tars of D0 and later: keys like TAR0 with a later date in place of D0's.
+  if ((NOAA == 0)); then
+    pre="${TAR0%%"$D0C"*}"; suf="${TAR0#*"$D0C"}"
+    list_prefix "$pre" | awk -F'\t' -v pre="$pre" -v suf="$suf" -v d0="$D0C" '
+      { c = substr($1, length(pre) + 1, 8) }
+      index($1, pre) == 1 && substr($1, length(pre) + 9) == suf &&
+      c ~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]$/ && c >= d0' >> "$PLAN"
+  fi
+
+  for f in snodas_mask.tif snodas_elevation.tif wbd_huc8.tif wbd_huc8.tif.aux.xml wbd_names.parquet; do
+    add_key "$(L key cache file="data/$f")"
+  done
+  add_key "$(L key subjects)"
 
   WYS=()
   for d in "${DATES[@]}"; do
+    rds=()
     for k in $(seq 1 30); do
       rd="$(minus_years "$d" "$k")"
       [[ "$rd" < 2003-09-30 ]] && break
-      add_key "cogs/${rd}/snodas_swe_${rd//-/}.tif"
+      rds+=("$rd")
     done
+    if ((${#rds[@]})); then
+      for key in $(L keys raw_cog date="$(IFS=,; echo "${rds[*]}")" var=swe); do add_key "$key"; done
+    fi
     for fl in ecdf zig zig_smooth; do
-      add_prefix "normals/gridded/${fl}/${d}/" '_swe_(ptile|standardized)\.tif$'
-      add_prefix "normals/zonal/wbd/${fl}/${d}/"
+      # The frozen normals, without the date's percentile grids (outputs).
+      add_prefix "$(L prefix normals_grid flavor="$fl" date="$d")" \
+        $(L keys percentile_grid flavor="$fl" date="$d" stat=ptile,standardized)
+      add_prefix "$(L prefix normals_table_day flavor="$fl" date="$d")"
     done
     WYS+=("$(water_year "$d")")
   done
   for wy in $(printf '%s\n' "${WYS[@]}" | sort -u); do
-    add_key "normals/zonal/wbd/observed/wy${wy}_swe.parquet"
-    add_key "normals/gridded/zig_smooth/wy${wy}/build.json"
-    add_key_opt "cache/plot_axes/wy${wy}_hypsomeswe.parquet"
-    list_prefix "normals/zonal/wbd/by_zone/wy${wy}/" | awk -F'\t' '$1 ~ /\/[^\/]*_swe\.parquet$/ && $1 !~ /hypsomeswe/' >> "$PLAN"
+    add_key "$(L key percentiles wy="$wy" type=swe)"
+    add_key "$(L key normals_grid_build wy="$wy")"
+    add_key_opt "$(L key cache file="plot_axes/wy${wy}_hypsomeswe.parquet")"
+    # Every zone's swe file: keys like the template's with any zone.
+    pre="$(L prefix normals_by_subject wy="$wy")"
+    suf="$(L key normals_by_subject wy="$wy" subject=ZONE type=swe)"; suf="${suf#"${pre}ZONE"}"
+    list_prefix "$pre" | awk -F'\t' -v pre="$pre" -v suf="$suf" '
+      { z = substr($1, length(pre) + 1, length($1) - length(pre) - length(suf)) }
+      index($1, pre) == 1 && length($1) > length(pre) + length(suf) &&
+      substr($1, length($1) - length(suf) + 1) == suf && z !~ /\//' >> "$PLAN"
   done
 else
-  # SNOTEL_PERIODS in R/normals.R.
-  PERIODS=(30yr snodas por)
-  add_key archive/snotel.parquet
+  add_key "$(L key raw)"
   WYS=()
   for d in "${DATES[@]}"; do
     WYS+=("$(water_year "$d")")
-    add_key_opt "plots/${d}/index.json"
+    add_key_opt "$(L key plot_index date="$d")"
   done
+  ROLES=($(L roles))
   for wy in $(printf '%s\n' "${WYS[@]}" | sort -u); do
-    add_key "normals/reference/wy${wy}.parquet"
-    for p in "${PERIODS[@]}"; do
-      add_key "normals/${p}/wy${wy}/normals.parquet"
-      add_key "normals/${p}/wy${wy}/provenance.json"
+    add_key "$(L key reference wy="$wy")"
+    for r in "${ROLES[@]}"; do
+      add_key "$(L key normals_table role="$r" wy="$wy")"
+      add_key "$(L key provenance role="$r" wy="$wy")"
     done
   done
 fi

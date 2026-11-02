@@ -10,7 +10,8 @@ subnet_ids = ["subnet-xxxxxxxxxxxxxxxxx"]
 # Optional: attach existing security groups to Fargate tasks
 # extra_security_group_ids = ["sg-xxxxxxxxxxxxxxxxx"]
 
-s3_bucket_name = "mco-snotel"
+# Optional: the bucket (default: the layout's, config/layout.yml).
+# s3_bucket_name = "mco-snotel"
 
 # Optional: an address subscribed directly to the SNS topic mco-snotel-alerts.
 # Alerts normally arrive through Listmonk (mesonet-alerts, "Snow: Pipeline alerts").

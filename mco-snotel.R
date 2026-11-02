@@ -19,7 +19,10 @@
 # Environment variables:
 #   SNOTEL_DATE          Date to plot and publish (default: the newest date
 #                        with SWE this water year)
-#   S3_BUCKET            S3 bucket name (default: mco-snotel)
+#   S3_BUCKET            S3 bucket name (default: the bucket in
+#                        config/layout.yml; LAYOUT_BUCKET overrides it)
+#   LAYOUT_CONFIG, LAYOUT_PREFIX  The layout file and a key prefix for every
+#                        object (R/layout.R; defaults config/layout.yml, none)
 #   WORK_DIR             Local working directory (default: s3)
 #   KEEP_LOCAL           Keep files in WORK_DIR as a local cache (default: TRUE;
 #                        FALSE in ECS)

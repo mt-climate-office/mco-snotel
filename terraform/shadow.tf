@@ -1,7 +1,7 @@
 # Shadow runs: the pipeline against a private copy of the bucket, to show a
 # change leaves the outputs as they are before it reaches production.
 #
-#   - var.shadow_s3_bucket_name: the test bucket. Private, versioned, and
+#   - local.shadow_s3_bucket_name: the test bucket. Private, versioned, and
 #     noncurrent versions expire after 30 days.
 #   - aws_iam_role.shadow_task: the shadow task's role.
 #   - aws_iam_role.shadow_local: the same permissions, assumed from the SSO
@@ -25,7 +25,7 @@ locals {
 # ── Test bucket ───────────────────────────────────────────────────────────────
 
 resource "aws_s3_bucket" "shadow" {
-  bucket = var.shadow_s3_bucket_name
+  bucket = local.shadow_s3_bucket_name
   tags   = local.shadow_tags
 
   lifecycle {

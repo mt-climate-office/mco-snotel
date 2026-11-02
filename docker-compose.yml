@@ -6,7 +6,6 @@ services:
     image: mco-snotel:latest
     environment:
       TZ: America/Denver
-      S3_BUCKET: mco-snotel
       WORK_DIR: /pipeline/s3
       AWS_PROFILE: mco
       AWS_DEFAULT_REGION: us-west-2

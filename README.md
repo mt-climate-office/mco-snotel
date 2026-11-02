@@ -139,15 +139,20 @@ mco-snotel.R           daily pipeline
 normals-annual.R       yearly normals build
 viz.R                  plots only, for past dates or other periods
 R/
-  pipeline_setup.R     configuration, S3 keys; sources R/, registers fonts
+  pipeline_setup.R     configuration; sources R/, registers fonts
+  layout.R             layout resolver: every S3 key, by artifact (config/layout.yml)
+  layout_cli.R         the resolver for shell scripts
   awdb.R               AWDB REST API: stations and daily data, batched
   archive.R            the archive: full and water-year refetches, state, SWE
   normals.R            periods, reference records, station normals and percentiles
   stages.R             stage functions
   plot_snotel.R        the station plot
   s3.R, s3_sync.R      S3 helpers, copied from mco-snodas
+config/                layout.yml: the bucket layout (layout_version 0, today's keys)
 scripts/               test_stations.R, check-plot-palette.R, backfill-figures.sh,
-                       publish-bucket-readmes.sh, run_local.sh, ecr-push.sh
+                       publish-bucket-readmes.sh, run_local.sh, ecr-push.sh,
+                       test_layout.R, check-no-paths.sh, check-layout-identical.sh
+scripts/keyset/        key-set harness: the S3 keys a run touches, on a stubbed S3
 scripts/parity/        shadow runs: seed.sh, diff.R, check-identical.sh
 s3-docs/               README.md for each bucket directory
 terraform/             AWS infrastructure
@@ -182,10 +187,27 @@ started. Run with `CORES=1` outside Docker on a Mac.
 | `VIZ_PERIODS` | `snodas` | `viz.R`: periods to plot. |
 | `VIZ_STATIONS` | all with SWE | `viz.R`: triplets to plot (for tests). |
 | `AWDB_CONCURRENCY` | `4` | Parallel AWDB requests. |
-| `S3_BUCKET` | `mco-snotel` | Bucket. |
+| `S3_BUCKET` | `bucket` in `config/layout.yml` | Bucket (`LAYOUT_BUCKET` overrides it). |
+| `LAYOUT_CONFIG` | `config/layout.yml` | Bucket layout. |
+| `LAYOUT_PREFIX` | none | A key prefix for every object (local or migration runs). |
 | `WORK_DIR` | `s3` | Local working directory. |
 | `KEEP_LOCAL` | `TRUE` | Keep local copies (`FALSE` in ECS). |
 | `CORES` | `1` | Plotting and fitting workers. |
+
+Every S3 key comes from the layout resolver: code names an artifact
+(`layout_key("percentiles", role = "snodas", wy = 2027)`, or
+`Rscript R/layout_cli.R key plot_index date=2026-11-01` in a script), and only
+`config/layout.yml` holds paths. Before a PR that touches `R/` or `scripts/`, run
+
+```bash
+Rscript scripts/test_layout.R              # the resolver and the layout files
+scripts/check-no-paths.sh                  # no bucket paths outside the resolver
+```
+
+No CI job runs them yet. A change to how keys are built should also leave the keys a run
+touches as they were: `scripts/keyset/` runs an entry script in the image against a stubbed
+S3, logging every read, write and delete, on two checkouts from the same seed
+(`run.sh`, then `compare.sh` and `scripts/parity/diff.R`).
 
 The first deploy needs the whole record and the current water year's normals before the
 daily run can work: run `normals-annual.R` once (it refetches the archive), then
