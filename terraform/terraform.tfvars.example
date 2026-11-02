@@ -12,6 +12,6 @@ subnet_ids = ["subnet-xxxxxxxxxxxxxxxxx"]
 
 s3_bucket_name = "mco-snotel"
 
-# Required: where alerts are emailed (SNS topic mco-snotel-alerts). Confirm the
-# subscription from the email AWS sends after apply.
-alert_email = ""
+# Optional: an address subscribed directly to the SNS topic mco-snotel-alerts.
+# Alerts normally arrive through Listmonk (mesonet-alerts, "Snow: Pipeline alerts").
+# alert_email = ""
