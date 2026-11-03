@@ -7,7 +7,7 @@ locals {
   # The bucket layout the pipeline uses (R/layout.R): its bucket, and keys
   # Terraform needs, from the artifact templates. An artifact is a template
   # string or a map with `template`.
-  layout           = yamldecode(file("${path.module}/../config/layout.yml"))
+  layout           = yamldecode(file("${path.module}/../config/${var.layout_file}"))
   layout_templates = { for id, a in local.layout.artifacts : id => try(a.template, a) }
 
   s3_bucket_name        = coalesce(var.s3_bucket_name, local.layout.bucket)
