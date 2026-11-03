@@ -25,6 +25,17 @@ variable "image_digest" {
   }
 }
 
+variable "layout_file" {
+  description = "Bucket layout (a file in config/) every task reads and writes, passed to the tasks as LAYOUT_CONFIG. Terraform reads the bucket and the keys it needs from it too. layout-v1.yml is layout v1; layout.yml is layout v0, retired 2026-11-03."
+  type        = string
+  default     = "layout-v1.yml"
+
+  validation {
+    condition     = can(regex("^layout[a-z0-9-]*\\.yml$", var.layout_file))
+    error_message = "layout_file must be a config/layout*.yml file name."
+  }
+}
+
 variable "project_name" {
   description = "Project name used for resource naming and tagging"
   type        = string
@@ -173,19 +184,7 @@ variable "freshness_schedule" {
 }
 
 variable "freshness_max_age_days" {
-  description = "Alert when latest/manifest.json's date is more than this many days before today (America/Denver)"
+  description = "Alert when the layout's latest manifest's date is more than this many days before today (America/Denver)"
   type        = number
   default     = 2
-}
-
-variable "v1_writer" {
-  description = "Run the layout v1 writer (dual-write) on its own schedule"
-  type        = bool
-  default     = true
-}
-
-variable "v1_schedule_time" {
-  description = "Cron expression for the layout v1 writer, evaluated in schedule_timezone (after the v0 run)"
-  type        = string
-  default     = "cron(45 11 * * ? *)"
 }

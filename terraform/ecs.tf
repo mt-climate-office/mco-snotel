@@ -47,6 +47,7 @@ resource "aws_ecs_task_definition" "pipeline" {
       environment = [
         { name = "TZ", value = "America/Denver" },
         { name = "S3_BUCKET", value = local.s3_bucket_name },
+        { name = "LAYOUT_CONFIG", value = "config/${var.layout_file}" },
         { name = "WORK_DIR", value = "/tmp/snotel" },
         { name = "KEEP_LOCAL", value = "FALSE" },
         { name = "CORES", value = tostring(var.container_cores) },
