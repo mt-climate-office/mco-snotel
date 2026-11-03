@@ -13,8 +13,8 @@
 #   - the archive has one file per water year ({wy} in raw);
 #   - flavors are published as empirical / fitted / smoothed, in keys and in
 #     the tables' flavor column;
-#   - artifacts v0 has and v1 does not (normals_coef, ..., latest_subjects,
-#     readme) are not written;
+#   - artifacts v0 has and v1 does not (normals_coef, ..., latest_subjects)
+#     are not written;
 #   - the cache is cache/v1/, so the two writers never share state.
 
 layout_version: 1
@@ -45,4 +45,6 @@ artifacts:
   plot_index:         "daily/plots/{period}/{date}/index_{period}_{date}.json"
   latest_copy:        "daily/latest/{artifact}_{role}.parquet"
   latest_manifest:    "daily/latest/manifest.json"
+  readme:             {template: "{dir}README.md", cache: long, source_name: true, formats: {dir: '([a-z0-9_]+/)*'},
+                       note: "bucket folder READMEs, from s3-docs/ by scripts/publish-bucket-readmes.sh (README.md by convention, hence source_name)"}
   cache:              "cache/v1/"
